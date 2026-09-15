@@ -16,6 +16,7 @@ const sendFiles = $<HTMLInputElement>("send-files");
 const protocolSelect = $<HTMLSelectElement>("protocol");
 const listenEveryInput = $<HTMLInputElement>("listen-every");
 const windowMsInput = $<HTMLInputElement>("window-ms");
+const turnaroundMsInput = $<HTMLInputElement>("turnaround-ms");
 const sendButton = $<HTMLButtonElement>("send");
 const sendStopButton = $<HTMLButtonElement>("send-stop");
 const listenButton = $<HTMLButtonElement>("listen");
@@ -38,16 +39,30 @@ function seconds(ms: number): string {
 
 const protocol = () => protocolSelect.value as SoundProtocol;
 
+const turnaroundMs = () => Math.max(0, Number(turnaroundMsInput.value) || 0);
+
 let windowEdited = false;
-function defaultWindowMs() {
+let turnaroundEdited = false;
+function defaults() {
+  if (!turnaroundEdited) {
+    turnaroundMsInput.value = protocol().startsWith("ultrasound")
+      ? "1000"
+      : "50";
+  }
   if (!windowEdited) {
-    windowMsInput.value = String(PACKET_SECONDS[protocol()] * 1000 + 50 + 500);
+    windowMsInput.value = String(
+      turnaroundMs() + PACKET_SECONDS[protocol()] * 1000 + 500,
+    );
   }
 }
-defaultWindowMs();
+defaults();
 windowMsInput.addEventListener("input", () => windowEdited = true);
+turnaroundMsInput.addEventListener("input", () => {
+  turnaroundEdited = true;
+  defaults();
+});
 protocolSelect.addEventListener("change", () => {
-  defaultWindowMs();
+  defaults();
   if (sound) sound.protocol = protocol();
 });
 
@@ -109,12 +124,12 @@ sendButton.addEventListener("click", async () => {
   sendStopButton.disabled = false;
   let stopTicker: (() => void) | undefined;
   try {
-    const items = await collectItems();
+    // getSound first, synchronously: iOS only lets an AudioContext made inside the gesture run.
+    const [s, items] = await Promise.all([getSound(), collectItems()]);
     if (!items.length) {
       log("send: nothing to send");
       return;
     }
-    const s = await getSound();
     await s.listen();
     s.protocol = protocol();
     const bundle = await encodeBundle(items);
@@ -199,10 +214,12 @@ listenButton.addEventListener("click", async () => {
     receivedItems.replaceChildren();
     const start = performance.now();
     stopTicker = ticker("rx-elapsed", start);
-    log("receive: listening");
+    const turnaround = turnaroundMs();
+    log(`receive: listening, turnaround ${turnaround} ms`);
     let counts = "heard 0, rejected 0";
     const received = await receiveBundle(s, {
       silenceMs: SILENCE_MS,
+      turnaroundMs: turnaround,
       signal: controller.signal,
       onProgress: ({ heard, rejected, transfers }) => {
         counts = `heard ${heard}, rejected ${rejected}`;

@@ -1,4 +1,4 @@
-import { sleep } from "./abort.ts";
+import { anySignal, sleep } from "./abort.ts";
 import { BundleError, decodeBundle, type Item } from "./bundle.ts";
 import type { PacketChannel } from "./channel.ts";
 import { Encoder } from "./fountain/encoder.ts";
@@ -28,7 +28,7 @@ export async function sendBundle(
   const transferId = crypto.getRandomValues(new Uint16Array(1))[0];
   const encoder = new Encoder(bundle, transferId);
   const heardDone = new AbortController();
-  const stop = AbortSignal.any([signal, heardDone.signal]);
+  const stop = anySignal(signal, heardDone.signal);
 
   const unsubscribe = channel.onPacket((bytes) => {
     if (stop.aborted) return;
@@ -75,6 +75,8 @@ export interface Received {
 
 export interface ReceiveOptions {
   silenceMs: number;
+  /** Wait before each DONE, so it lands after the sender's microphone is rolling again. */
+  turnaroundMs?: number;
   signal: AbortSignal;
   onProgress?: (p: ReceiveProgress) => void;
   onComplete?: (r: Received) => void;
@@ -85,7 +87,14 @@ export function receiveBundle(
   channel: PacketChannel,
   options: ReceiveOptions,
 ): Promise<Received | undefined> {
-  const { silenceMs, signal, onProgress, onComplete, onDone } = options;
+  const {
+    silenceMs,
+    turnaroundMs = 0,
+    signal,
+    onProgress,
+    onComplete,
+    onDone,
+  } = options;
 
   return new Promise((resolve, reject) => {
     const receiver = new Receiver();
@@ -110,6 +119,10 @@ export function receiveBundle(
       clearTimeout(timer);
       const { transferId } = received!;
       try {
+        if (turnaroundMs > 0) {
+          await sleep(turnaroundMs, signal);
+          if (finished) return;
+        }
         await channel.send([
           encodePacket({
             type: PacketType.Done,

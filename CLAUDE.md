@@ -94,6 +94,8 @@ Wire facts (multi-byte fields big-endian):
 - A device cannot hear its peer while its own speaker plays.
 - Ultrasound on iOS closes the mic around a send, or playback stays in call
   mode.
+- The receiver waits `turnaroundMs` before each DONE: after an ultrasound burst
+  the sender's mic takes hundreds of ms to reopen and would miss it.
 - Airgap's service-worker cache gotcha does not apply: there is no service
   worker.
 

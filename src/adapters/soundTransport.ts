@@ -57,7 +57,7 @@ export class SoundTransport implements PacketChannel {
     } catch (err) {
       if (!signal.aborted) throw err;
     } finally {
-      if (ultrasound) this.#restoreMicrophone();
+      if (ultrasound) await this.#restoreMicrophone();
     }
   }
 
@@ -81,13 +81,17 @@ export class SoundTransport implements PacketChannel {
     );
   }
 
-  #restoreMicrophone(): void {
+  /** Awaited, so the caller's listen window starts with the microphone rolling. */
+  async #restoreMicrophone(): Promise<void> {
     if (--this.#ultrasoundSends > 0) return;
     setAudioSessionType("auto");
-    if (this.#wantsMicrophone) {
-      this.#openMicrophone().catch((err) =>
-        this.log(`microphone reopen failed: ${err}`)
-      );
+    if (!this.#wantsMicrophone || this.#microphone) return;
+    const start = performance.now();
+    try {
+      await this.#openMicrophone();
+      this.log(`mic reopened in ${Math.round(performance.now() - start)} ms`);
+    } catch (err) {
+      this.log(`microphone reopen failed: ${err}`);
     }
   }
 

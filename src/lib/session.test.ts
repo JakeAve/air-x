@@ -38,8 +38,9 @@ class Air {
     this.#drop = options.drop ?? (() => false);
   }
 
-  party(): PacketChannel {
-    const party = new Party(this);
+  /** `deafMs`: after its last packet, the party keeps its microphone closed this long before `send` resolves. */
+  party(deafMs = 0): PacketChannel {
+    const party = new Party(this, deafMs);
     this.#parties.add(party);
     return party;
   }
@@ -57,10 +58,12 @@ class Air {
 class Party implements PacketChannel {
   sending = false;
   readonly #air: Air;
+  readonly #deafMs: number;
   readonly #listeners = new Set<(bytes: Uint8Array) => void>();
 
-  constructor(air: Air) {
+  constructor(air: Air, deafMs: number) {
     this.#air = air;
+    this.#deafMs = deafMs;
   }
 
   async send(packets: Uint8Array[], signal: AbortSignal): Promise<void> {
@@ -70,6 +73,7 @@ class Party implements PacketChannel {
         await sleep(AIRTIME_MS, signal);
         this.#air.deliver(this, packet);
       }
+      if (this.#deafMs > 0) await sleep(this.#deafMs, signal);
     } finally {
       this.sending = false;
     }
@@ -243,4 +247,29 @@ Deno.test("foreign transfers and corrupt bytes are counted and ignored", async (
   assert(result);
   assertEquals(result.items, items);
   assertEquals(last?.rejected, 2);
+});
+
+Deno.test("a receiver turnaround longer than the sender's deaf time lets DONE land", async () => {
+  const items = testItems();
+  const bundle = await encodeBundle(items);
+  const air = new Air({ seed: 7 });
+  const stopReceiver = new AbortController();
+  const stopSender = new AbortController();
+  const giveUp = setTimeout(() => stopSender.abort(), 5_000);
+
+  const received = receiveBundle(air.party(), {
+    silenceMs: 5_000,
+    turnaroundMs: 60,
+    signal: stopReceiver.signal,
+  });
+  const sent = await sendBundle(air.party(30), bundle, {
+    listenEvery: LISTEN_EVERY,
+    windowMs: 150,
+    signal: stopSender.signal,
+  });
+  clearTimeout(giveUp);
+  stopReceiver.abort();
+
+  assertEquals(sent, "done");
+  assertEquals((await received)?.items, items);
 });

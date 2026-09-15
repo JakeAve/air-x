@@ -44,10 +44,11 @@ The pre-commit and pre-push hooks run `check` and `test`.
 ## Testing on phones
 
 Open `https://<host>:8444/diag.html` on two devices: type text or pick files on
-one and press Send, press Listen on the other. The page logs loss, rejected
-packets, and when DONE is sent and heard. Browsers only allow the microphone on
-secure origins, so for local testing over Wi-Fi the dev server needs a
-certificate. With [mkcert](https://github.com/FiloSottile/mkcert):
+one and press Send, press Listen on the other. Send uses QR, sound, or both;
+Listen watches the camera and the microphone at once. The page logs loss,
+rejected packets, and when DONE is sent and heard. Browsers only allow the
+microphone on secure origins, so for local testing over Wi-Fi the dev server
+needs a certificate. With [mkcert](https://github.com/FiloSottile/mkcert):
 
 ```bash
 mkdir -p .certs
@@ -57,3 +58,19 @@ deno task dev   # now serves https on port 8444
 
 Replace the IP with your machine's LAN address. On each phone, install and trust
 mkcert's root CA, `rootCA.pem` from the directory `mkcert -CAROOT` prints.
+
+### QR between two phones
+
+1. On the receiver, leave Camera on and press Listen. The rear camera opens; use
+   Flip camera if the preview shows your face.
+2. On the sender, turn screen brightness all the way up, type something, and
+   press Send. The code fills the screen.
+3. Point the receiver's rear camera at the sender's screen, close enough that
+   the code fills most of the preview, and hold steady.
+4. The receiver shows packets via QR, QR packets per second, and codes found per
+   frames scanned. If few frames yield a code, lower packets per code (smaller,
+   coarser codes) or fps (each code stays up longer), or raise scan max edge. If
+   nearly every frame decodes, raise packets per code or fps for throughput.
+
+DONE always goes back by sound, so keep both phones' volume up even when sending
+by QR only.

@@ -92,6 +92,12 @@ button {
   font-weight: 600;
 }
 
+button.secondary {
+  background: var(--bg);
+  color: var(--fg);
+  border-color: var(--line);
+}
+
 button:disabled {
   opacity: 0.4;
 }
@@ -148,4 +154,56 @@ summary {
   align-items: center;
   font-weight: 600;
   cursor: pointer;
+}
+
+fieldset {
+  display: grid;
+  gap: var(--gap);
+  margin: 0;
+  padding: var(--gap);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: var(--touch);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.toggle input {
+  width: 1.5rem;
+  min-height: 0;
+  height: 1.5rem;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* As big a square as the viewport allows, centred on the page even where it overflows the card. */
+.qr {
+  --qr-size: calc(min(100vw, 100dvh) - 2 * var(--gap));
+  display: block;
+  width: var(--qr-size);
+  height: var(--qr-size);
+  margin-inline: calc(50% - var(--qr-size) / 2);
+  background: #ffffff;
+  image-rendering: pixelated;
+}
+
+.preview {
+  width: 100%;
+  max-height: 50dvh;
+  background: #000000;
+  border-radius: var(--radius);
+}
+
+.preview.mirrored {
+  transform: scaleX(-1);
+}
+
+[hidden] {
+  display: none !important;
 }

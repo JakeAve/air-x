@@ -16,6 +16,10 @@ export class Decoder {
   #seen = new Set<number>();
   // Every pending symbol references only unresolved blocks, indexed by each.
   #pendingByBlock: Set<PendingSymbol>[] = [];
+  #pending = new Set<PendingSymbol>();
+  // Each symbol lowers the unknowns left after elimination by at most one, so
+  // after a failed elimination wait that many new symbols before retrying.
+  #eliminateAfter = 0;
 
   get transferId(): number | undefined {
     return this.#transferId;
@@ -55,11 +59,21 @@ export class Decoder {
       else blocks.add(block);
     }
 
+    if (blocks.size === 0) return undefined;
     if (blocks.size === 1) {
       this.#resolve([...blocks][0], data);
-    } else if (blocks.size > 1) {
+    } else {
       const symbol = { blocks, data };
+      this.#pending.add(symbol);
       for (const block of blocks) this.#pendingByBlock[block].add(symbol);
+    }
+
+    const unresolved = this.#k - this.#resolved;
+    if (
+      --this.#eliminateAfter <= 0 && unresolved > 0 &&
+      this.#pending.size >= unresolved
+    ) {
+      this.#eliminate();
     }
 
     return this.#resolved === this.#k ? this.#blocks : undefined;
@@ -80,6 +94,7 @@ export class Decoder {
         if (symbol.blocks.size === 1) {
           const [last] = symbol.blocks;
           this.#pendingByBlock[last].delete(symbol);
+          this.#pending.delete(symbol);
           queue.push([last, symbol.data]);
         }
       }
@@ -87,8 +102,75 @@ export class Decoder {
     }
   }
 
+  // Gauss-Jordan over GF(2) on the pending symbols, restricted to unresolved
+  // blocks. Rows that reduce to a single block go back through #resolve.
+  #eliminate(): void {
+    const k = this.#k!;
+    const columns = new Int32Array(k).fill(-1);
+    const unresolved: number[] = [];
+    for (let b = 0; b < k; b++) {
+      if (!this.#isResolved[b]) columns[b] = unresolved.push(b) - 1;
+    }
+    const n = unresolved.length;
+    const words = (n + 31) >>> 5;
+    const symbols = [...this.#pending];
+    const m = symbols.length;
+    const bits = new Uint32Array(m * words);
+    const data = new Uint8Array(m * DATA_BYTES);
+    symbols.forEach((symbol, row) => {
+      for (const b of symbol.blocks) {
+        const col = columns[b];
+        bits[row * words + (col >>> 5)] |= 1 << (col & 31);
+      }
+      data.set(symbol.data, row * DATA_BYTES);
+    });
+
+    const rows = Array.from({ length: m }, (_, i) => i);
+    const pivots: number[] = [];
+    for (let col = 0; col < n && pivots.length < m; col++) {
+      const word = col >>> 5;
+      const bit = 1 << (col & 31);
+      const rank = pivots.length;
+      let p = rank;
+      while (p < m && !(bits[rows[p] * words + word] & bit)) p++;
+      if (p === m) continue;
+      [rows[rank], rows[p]] = [rows[p], rows[rank]];
+      const pivot = rows[rank];
+      for (let i = 0; i < m; i++) {
+        const row = rows[i];
+        if (row === pivot || !(bits[row * words + word] & bit)) continue;
+        for (let w = 0; w < words; w++) {
+          bits[row * words + w] ^= bits[pivot * words + w];
+        }
+        for (let j = 0; j < DATA_BYTES; j++) {
+          data[row * DATA_BYTES + j] ^= data[pivot * DATA_BYTES + j];
+        }
+      }
+      pivots.push(col);
+    }
+
+    this.#eliminateAfter = n - pivots.length;
+    pivots.forEach((col, i) => {
+      const row = rows[i];
+      let weight = 0;
+      for (let w = 0; w < words; w++) weight += popcount(bits[row * words + w]);
+      if (weight === 1) {
+        this.#resolve(
+          unresolved[col],
+          data.slice(row * DATA_BYTES, (row + 1) * DATA_BYTES),
+        );
+      }
+    });
+  }
+
   #xorBlock(data: Uint8Array, block: number): void {
     const offset = block * DATA_BYTES;
     for (let i = 0; i < DATA_BYTES; i++) data[i] ^= this.#blocks[offset + i];
   }
+}
+
+function popcount(x: number): number {
+  x -= (x >>> 1) & 0x55555555;
+  x = (x & 0x33333333) + ((x >>> 2) & 0x33333333);
+  return (((x + (x >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24;
 }

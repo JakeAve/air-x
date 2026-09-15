@@ -1,0 +1,12 @@
+dist/
+node_modules/
+.certs/
+docs/
+**/.DS_Store
+.superpowers/
+.playwright-mcp/
+.playwright-profile/
+.impeccable/
+.worktrees/
+.claude/worktrees/
+.claude/settings.local.json

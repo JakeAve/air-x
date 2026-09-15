@@ -1,0 +1,19 @@
+{
+  "tasks": {
+    "setup": "git config core.hooksPath .githooks && chmod +x .githooks/pre-commit .githooks/pre-push",
+    "check": "deno fmt --check && deno lint --permit-no-files && deno check .",
+    "test": "deno test -A --permit-no-files",
+    "pre-commit": "deno task check && deno task test",
+    "pre-push": "deno task check && deno task test"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "lib": ["dom", "dom.iterable", "dom.asynciterable", "esnext", "deno.ns"]
+  },
+  "lint": {
+    "rules": {
+      "tags": ["recommended"]
+    }
+  },
+  "exclude": ["dist/", "node_modules/", ".claude/worktrees/", ".worktrees/"]
+}

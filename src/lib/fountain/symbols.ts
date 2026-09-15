@@ -1,8 +1,8 @@
-// LT code symbol selection. Everything here is wire behavior: sender and
+// Fountain symbol selection: dense random rows up to DENSE_MAX_K, LT above. Everything here is wire behavior: sender and
 // receiver must derive identical block sets from (transferId, symbolId, k)
 // forever, on every JS engine. Math.log and Math.sqrt are not guaranteed
 // bit-identical across engines, so ln and sqrt are built from + - * / only.
-import { DATA_BYTES } from "../protocol.ts";
+import { DATA_BYTES, DENSE_MAX_K } from "../protocol.ts";
 
 const C = 0.1;
 const DELTA = 0.5;
@@ -20,6 +20,11 @@ export function blockSet(
   if (symbolId < k) return [symbolId];
 
   const random = mulberry32(Math.imul(transferId + 1, 0x9e3779b1) ^ symbolId);
+  if (k <= DENSE_MAX_K) {
+    const blocks: number[] = [];
+    for (let b = 0; b < k; b++) if (random() < 0.5) blocks.push(b);
+    return blocks.length ? blocks : [Math.floor(random() * k)];
+  }
   const degree = sampleDegree(k, random());
   const blocks = new Set<number>();
   while (blocks.size < degree) blocks.add(Math.floor(random() * k));

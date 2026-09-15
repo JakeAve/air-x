@@ -2,6 +2,10 @@ import { type Packet, PacketType } from "../packet.ts";
 import { DATA_BYTES } from "../protocol.ts";
 import { blockSet } from "./symbols.ts";
 
+// Bounds one elimination to about 512² bit operations; above it peeling alone
+// carries the transfer until enough blocks resolve.
+const MAX_ELIMINATION_BLOCKS = 512;
+
 interface PendingSymbol {
   blocks: Set<number>;
   data: Uint8Array;
@@ -71,7 +75,7 @@ export class Decoder {
     const unresolved = this.#k - this.#resolved;
     if (
       --this.#eliminateAfter <= 0 && unresolved > 0 &&
-      this.#pending.size >= unresolved
+      unresolved <= MAX_ELIMINATION_BLOCKS && this.#pending.size >= unresolved
     ) {
       this.#eliminate();
     }

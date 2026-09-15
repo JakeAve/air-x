@@ -24,7 +24,8 @@ gitignored).
 - `packet.ts` — 64-byte packet codec; rejects bad CRC, version, or type.
 - `bundle.ts` — items to one byte string: deflate-raw plus truncated SHA-256.
 - `fountain/symbols.ts` — `blockCount`, and `blockSet`: which blocks a symbol id
-  XORs (systematic below K, robust soliton LT above).
+  XORs (systematic below K; above it, dense random rows for `k <= DENSE_MAX_K`,
+  robust soliton LT otherwise).
 - `fountain/encoder.ts` — `Encoder`: an endless stream of packets for a bundle.
 - `fountain/decoder.ts` — `Decoder`: peeling, then Gaussian elimination over
   GF(2) when peeling stalls; returns the zero-padded bundle.
@@ -38,6 +39,9 @@ Wire facts (multi-byte fields big-endian):
   `u32 length | deflate-raw(u32 manifestLength | manifest JSON | item bytes...) | sha256[0..8]`.
   `length` counts compressed bytes plus hash, so block padding past it is
   ignored.
+- Repair symbols for `k <= DENSE_MAX_K` (128) are dense: each block is included
+  with probability 1/2, one mulberry32 draw per block in order, falling back to
+  one block if empty. Larger k uses robust soliton degrees.
 - `blockSet(transferId, symbolId, k)` must never change output without a
   `PROTOCOL_VERSION` bump: sender and receiver derive block sets independently,
   and `symbols.test.ts` pins golden values. It avoids `Math.log`/`Math.sqrt`

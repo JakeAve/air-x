@@ -12,6 +12,8 @@ import {
   SOUND_SAMPLES_PER_BLOCK,
 } from "@/lib/protocol.ts";
 
+export { PACKET_SECONDS } from "@/lib/protocol.ts";
+
 export type { GgwaveInstance, GgwaveModule, GgwaveProtocolId };
 
 export type SoundProtocol =
@@ -72,17 +74,3 @@ export function protocolId(
       return g.ProtocolId.GGWAVE_PROTOCOL_ULTRASOUND_NORMAL;
   }
 }
-
-/**
- * Seconds to transmit one 64-byte packet, measured with SoundEncoder at
- * volume 50. Pins encode duration so a ggwave upgrade that changes timing is
- * caught by sound.test.ts instead of silently drifting.
- */
-export const PACKET_SECONDS: Record<SoundProtocol, number> = {
-  "fastest": 1.92,
-  "fast": 3.84,
-  "normal": 5.76,
-  "ultrasound-fastest": 1.92,
-  "ultrasound-fast": 3.84,
-  "ultrasound-normal": 5.76,
-};

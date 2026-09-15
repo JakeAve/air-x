@@ -4,22 +4,40 @@
     "check": "deno fmt --check && deno lint --permit-no-files && deno check .",
     "test": "deno test -A --permit-no-files",
     "pre-commit": "deno task check && deno task test",
-    "pre-push": "deno task check && deno task test"
+    "pre-push": "deno task check && deno task test",
+    "build": "deno run -A scripts/build.ts",
+    "dev": "deno run -A scripts/dev.ts"
   },
   "imports": {
     "@/": "./src/",
     "ggwave": "npm:ggwave@^0.4.0",
-    "@std/assert": "jsr:@std/assert@^1"
+    "@std/assert": "jsr:@std/assert@^1",
+    "@std/fs": "jsr:@std/fs@^1",
+    "@std/http": "jsr:@std/http@^1",
+    "@std/path": "jsr:@std/path@^1"
   },
   "compilerOptions": {
     "strict": true,
-    "lib": ["dom", "dom.iterable", "dom.asynciterable", "esnext", "deno.ns"]
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "dom.asynciterable",
+      "esnext",
+      "deno.ns"
+    ]
   },
   "lint": {
     "rules": {
-      "tags": ["recommended"]
+      "tags": [
+        "recommended"
+      ]
     }
   },
-  "exclude": ["dist/", "node_modules/", ".claude/worktrees/", ".worktrees/"],
+  "exclude": [
+    "dist/",
+    "node_modules/",
+    ".claude/worktrees/",
+    ".worktrees/"
+  ],
   "nodeModulesDir": "auto"
 }

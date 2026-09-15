@@ -12,14 +12,39 @@ uses the same transports for games. Deno 2 + TypeScript, plain HTML and CSS.
   `TextEncoder`).
 - **Tests:** `deno test`, colocated `*.test.ts`, seeded PRNGs so every run is
   identical.
-- **Imports:** `@std/assert`, and `@/` for `./src/`.
+- **Imports:** `@std/assert`, `@std/fs`, `@std/path`, `@std/http`, `ggwave`, and
+  `@/` for `./src/`.
+
+## Commands
+
+```bash
+deno task dev     # build to dist/, serve on PORT (default 8444), rebuild on change
+deno task build   # build to dist/
+```
+
+`dev` serves HTTPS when `.certs/cert.pem` and `.certs/key.pem` exist (README).
+
+## Layout
+
+- `scripts/build.ts` — copies `static/` to `dist/` and bundles `src/diag.ts`,
+  `src/codecWorker.ts`, `src/captureWorklet.ts`. `scripts/dev.ts` serves it.
+- `static/` — `diag.html` and `styles.css`. Every asset path is relative.
+- `src/diag.ts` — diag page: send text and files by sound, receive, log.
+- `src/adapters/` — the only browser-API code besides the entries:
+  `pageSound.ts` (`openSound`), `soundTransport.ts` (`SoundTransport`, a
+  `PacketChannel`), `codecWorker.ts`, `microphone.ts`, `speaker.ts`.
+- `src/codecWorker.ts` — worker hosting ggwave, so the page bundle carries no
+  WASM. Page code imports `PACKET_SECONDS` from `protocol.ts`, not `ggwave.ts`.
+- `src/captureWorklet.ts` — AudioWorklet forwarding mic samples in 1024-sample
+  blocks.
 
 ## `src/lib/`
 
 The protocol layer. Spec: `docs/specs/2026-09-14-transfer-protocol.md` (local,
 gitignored).
 
-- `protocol.ts` — wire constants: version, packet sizes, `MAX_K`.
+- `protocol.ts` — wire constants: version, packet sizes, `MAX_K`, and
+  `PACKET_SECONDS` per sound protocol.
 - `crc16.ts` — CRC-16/CCITT-FALSE over the packet.
 - `packet.ts` — 64-byte packet codec; rejects bad CRC, version, or type.
 - `bundle.ts` — items to one byte string: deflate-raw plus truncated SHA-256.
@@ -29,6 +54,14 @@ gitignored).
 - `fountain/encoder.ts` — `Encoder`: an endless stream of packets for a bundle.
 - `fountain/decoder.ts` — `Decoder`: peeling, then Gaussian elimination over
   GF(2) when peeling stalls; returns the zero-padded bundle.
+- `abort.ts` — `sleep` and `aborted` on an `AbortSignal`.
+- `channel.ts` — `PacketChannel`: `send(packets, signal)` and `onPacket`.
+- `receiver.ts` — `Receiver`: one decoder per interleaved transfer, evicts stale
+  ones.
+- `session.ts` — `sendBundle` (bursts of `listenEvery`, then a listen window,
+  until DONE) and `receiveBundle` (sends DONE, finishes after `silenceMs`).
+- `sound/` — ggwave wrapper (`ggwave.ts`), `SoundEncoder`, `SoundDecoder`, and
+  the codec worker's message types.
 
 Wire facts (multi-byte fields big-endian):
 
@@ -49,6 +82,16 @@ Wire facts (multi-byte fields big-endian):
 - `MAX_BUNDLE_BYTES` (16 MiB) caps `Encoder`'s input and the decoder ignores any
   packet whose `k` implies a bigger bundle; `MAX_INFLATED_BYTES` (64 MiB) caps
   `decodeBundle`'s decompression output.
+
+## Hardware facts
+
+- iOS needs a user gesture before an AudioContext runs or the mic opens.
+- The mic opens once and stays rolling: `getUserMedia` is too slow between legs.
+- A device cannot hear its peer while its own speaker plays.
+- Ultrasound on iOS closes the mic around a send, or playback stays in call
+  mode.
+- Airgap's service-worker cache gotcha does not apply: there is no service
+  worker.
 
 ## Workflow
 

@@ -25,4 +25,7 @@ deno task check   # fmt check + lint + type check
 deno task test    # unit tests
 ```
 
+`deno task test` covers the protocol layer in `src/lib/`: packet and bundle
+codecs, and the fountain code under simulated packet loss.
+
 The pre-commit and pre-push hooks run `check` and `test`.

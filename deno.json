@@ -6,6 +6,10 @@
     "pre-commit": "deno task check && deno task test",
     "pre-push": "deno task check && deno task test"
   },
+  "imports": {
+    "@/": "./src/",
+    "@std/assert": "jsr:@std/assert@^1"
+  },
   "compilerOptions": {
     "strict": true,
     "lib": ["dom", "dom.iterable", "dom.asynciterable", "esnext", "deno.ns"]

@@ -6,11 +6,13 @@
     "pre-commit": "deno task check && deno task test",
     "pre-push": "deno task check && deno task test",
     "build": "deno run -A scripts/build.ts",
-    "dev": "deno run -A scripts/dev.ts"
+    "dev": "deno run -A scripts/dev.ts",
+    "e2e": "deno task build && deno run -A scripts/e2e/receive.ts"
   },
   "imports": {
     "@/": "./src/",
     "ggwave": "npm:ggwave@^0.4.0",
+    "playwright": "npm:playwright@^1.63",
     "@std/assert": "jsr:@std/assert@^1",
     "@std/fs": "jsr:@std/fs@^1",
     "@std/http": "jsr:@std/http@^1",

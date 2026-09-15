@@ -25,10 +25,19 @@ deno task dev     # builds to dist/ and serves it on port 8444, rebuilding on ch
 deno task check   # fmt check + lint + type check
 deno task test    # unit tests
 deno task build   # production build to dist/
+deno task e2e     # headless receive test: sound in, item out
 ```
 
 `deno task test` covers the protocol layer in `src/lib/`: packet and bundle
 codecs, and the fountain code under simulated packet loss.
+
+`deno task e2e` builds the site, feeds a transfer's packets to headless
+Chromium's fake microphone, and checks the diag page receives the item. It needs
+Playwright's Chromium installed once:
+
+```bash
+deno run -A npm:playwright install chromium
+```
 
 The pre-commit and pre-push hooks run `check` and `test`.
 

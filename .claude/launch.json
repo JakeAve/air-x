@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dev",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "PORT=8444 deno task dev"],
+      "port": 8444,
+      "url": "https://localhost:8444"
+    }
+  ]
+}

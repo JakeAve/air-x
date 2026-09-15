@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Air X diagnostics</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Air X diagnostics</h1>
+      <p class="muted">Send text and files between two devices by sound.</p>
+
+      <section class="card">
+        <h2>Send</h2>
+        <label>Text
+          <textarea id="send-text" rows="3" placeholder="hello air x"></textarea>
+        </label>
+        <label>Files <input id="send-files" type="file" multiple /></label>
+        <label>Sound protocol
+          <select id="protocol">
+            <option value="fastest">fastest</option>
+            <option value="fast">fast</option>
+            <option value="normal">normal</option>
+            <option value="ultrasound-fastest">ultrasound fastest</option>
+            <option value="ultrasound-fast">ultrasound fast</option>
+            <option value="ultrasound-normal">ultrasound normal</option>
+          </select>
+        </label>
+        <div class="row">
+          <label>Listen every
+            <input id="listen-every" type="number" inputmode="numeric" min="1" step="1" value="8" />
+          </label>
+          <label>Window ms
+            <input id="window-ms" type="number" inputmode="numeric" min="0" step="50" />
+          </label>
+        </div>
+        <div class="row">
+          <button id="send">Send</button>
+          <button id="send-stop" disabled>Stop</button>
+        </div>
+        <dl class="facts">
+          <dt>Transfer</dt>
+          <dd id="send-transfer">–</dd>
+          <dt>k</dt>
+          <dd id="send-k">–</dd>
+          <dt>Packets sent</dt>
+          <dd id="send-sent">–</dd>
+          <dt>Elapsed</dt>
+          <dd id="send-elapsed">–</dd>
+          <dt>Estimate</dt>
+          <dd id="send-estimate">–</dd>
+        </dl>
+      </section>
+
+      <section class="card">
+        <h2>Receive</h2>
+        <label>Turnaround ms
+          <input id="turnaround-ms" type="number" inputmode="numeric" min="0" step="50" />
+        </label>
+        <div class="row">
+          <button id="listen">Listen</button>
+          <button id="listen-stop" disabled>Stop</button>
+        </div>
+        <dl class="facts">
+          <dt>Heard</dt>
+          <dd id="rx-heard">–</dd>
+          <dt>Rejected</dt>
+          <dd id="rx-rejected">–</dd>
+          <dt>Transfers</dt>
+          <dd id="rx-transfers">–</dd>
+          <dt>Elapsed</dt>
+          <dd id="rx-elapsed">–</dd>
+        </dl>
+        <ul id="received-items" class="items"></ul>
+      </section>
+
+      <details class="card">
+        <summary>Log</summary>
+        <pre id="log"></pre>
+      </details>
+    </main>
+    <script type="module" src="./diag.js"></script>
+  </body>
+</html>

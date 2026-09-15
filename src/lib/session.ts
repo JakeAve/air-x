@@ -112,6 +112,7 @@ export interface ReceiveProgress {
   heard: number;
   soundHeard: number;
   sourceHeard: number;
+  sourceNew: number;
   rejected: number;
   transfers: TransferProgress[];
 }
@@ -152,7 +153,9 @@ export function receiveBundle(
     const receiver = new Receiver();
     let soundHeard = 0;
     let sourceHeard = 0;
+    let sourceNew = 0;
     let rejected = 0;
+    const seenSymbols = new Set<number>();
     let received: Received | undefined;
     let doneSent = false;
     let heardSinceDone = false;
@@ -235,6 +238,12 @@ export function receiveBundle(
       } else {
         if (fromSound) soundHeard++;
         else sourceHeard++;
+        if (packet.type !== PacketType.Done) {
+          const key = packet.transferId * 2 ** 24 + packet.symbolId;
+          const isNew = !seenSymbols.has(key);
+          seenSymbols.add(key);
+          if (!fromSound && isNew) sourceNew++;
+        }
         const soundListen = fromSound &&
           packet.type === PacketType.DataListen;
         if (fromSound && !received && packet.type !== PacketType.Done) {
@@ -258,6 +267,7 @@ export function receiveBundle(
         heard: soundHeard + sourceHeard,
         soundHeard,
         sourceHeard,
+        sourceNew,
         rejected,
         transfers: receiver.progress(),
       });

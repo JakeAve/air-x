@@ -119,6 +119,22 @@ class Display implements PacketDisplay, PacketSource {
   }
 }
 
+/** Wraps a source so every packet reaches listeners twice, like a code held on screen across frames. */
+class DoublingSource implements PacketSource {
+  readonly #inner: PacketSource;
+
+  constructor(inner: PacketSource) {
+    this.#inner = inner;
+  }
+
+  onPacket(listener: (bytes: Uint8Array) => void): () => void {
+    return this.#inner.onPacket((bytes) => {
+      listener(bytes);
+      listener(bytes);
+    });
+  }
+}
+
 function testItems(noiseBytes = 400): Item[] {
   const random = seededRandom(42);
   const bytes = new Uint8Array(noiseBytes);
@@ -374,6 +390,36 @@ Deno.test("sound and QR together use fewer sound packets than sound alone", asyn
   const alone = await soundPackets(false);
   const together = await soundPackets(true);
   assert(together < alone, `${together} >= ${alone}`);
+});
+
+Deno.test("a source that delivers each code twice counts sourceNew once per symbol", async () => {
+  const items = testItems();
+  const bundle = await encodeBundle(items);
+  const air = new Air({ seed: 11 });
+  const display = new Display({ seed: 11 });
+  const doubling = new DoublingSource(display);
+  const stopReceiver = new AbortController();
+  let last: ReceiveProgress | undefined;
+
+  const received = receiveBundle({
+    sound: air.party(),
+    sources: [doubling],
+    silenceMs: 60_000,
+    signal: stopReceiver.signal,
+    onProgress: (p) => last = p,
+  });
+  const sent = await sendBundle(bundle, {
+    listen: air.party(),
+    qr: { display, packetsPerCode: 4, fps: 100 },
+    signal: new AbortController().signal,
+  });
+
+  assertEquals(sent, "done");
+  stopReceiver.abort();
+  await received;
+  assert(last);
+  assert(last!.sourceNew > 0);
+  assertEquals(last!.sourceHeard, last!.sourceNew * 2);
 });
 
 Deno.test("a QR-only transfer whose DONE is lost gets DONE again after silence, then finishes", async () => {

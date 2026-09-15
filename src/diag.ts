@@ -331,16 +331,14 @@ listenButton.addEventListener("click", async () => {
     Object.assign(qr.stats, { frames: 0, codes: 0, packets: 0 });
     const start = performance.now();
     stopTicker = ticker("rx-elapsed", start);
-    let sourceHeard = 0;
-    const samples: [time: number, heard: number][] = [];
+    let sourceNew = 0;
+    const samples: [time: number, sourceNew: number][] = [];
     const poll = setInterval(() => {
       const now = performance.now();
-      samples.push([now, sourceHeard]);
+      samples.push([now, sourceNew]);
       while (now - samples[0][0] > RATE_WINDOW_MS) samples.shift();
-      const [then, heardThen] = samples[0];
-      const rate = now > then
-        ? (sourceHeard - heardThen) * 1000 / (now - then)
-        : 0;
+      const [then, newThen] = samples[0];
+      const rate = now > then ? (sourceNew - newThen) * 1000 / (now - then) : 0;
       show("rx-qr-rate", `${rate.toFixed(1)}/s`);
       show("rx-codes", `${qr.stats.codes} / ${qr.stats.frames}`);
     }, 500);
@@ -359,9 +357,15 @@ listenButton.addEventListener("click", async () => {
       turnaroundMs: turnaround,
       signal: controller.signal,
       onProgress: (
-        { soundHeard, sourceHeard: qrHeard, rejected, transfers },
+        {
+          soundHeard,
+          sourceHeard: qrHeard,
+          sourceNew: qrNew,
+          rejected,
+          transfers,
+        },
       ) => {
-        sourceHeard = qrHeard;
+        sourceNew = qrNew;
         counts = `sound ${soundHeard}, qr ${qrHeard}, rejected ${rejected}`;
         show("rx-sound-heard", soundHeard);
         show("rx-qr-heard", qrHeard);

@@ -12,6 +12,8 @@ export class QrTransport implements PacketSource, PacketDisplay {
   #worker: CodecWorker;
   #camera: Camera | undefined;
   #watching: AbortController | undefined;
+  #opening: Promise<void> | undefined;
+  #wantsCamera = false;
   #listeners = new Set<PacketListener>();
   ecc: QrEcc = "medium";
   facing: Facing = "environment";
@@ -44,26 +46,41 @@ export class QrTransport implements PacketSource, PacketDisplay {
    */
   async watch(): Promise<void> {
     if (this.#camera) return;
-    const camera = await Camera.open(this.#video, this.facing);
-    const stop = new AbortController();
-    this.#camera = camera;
-    this.#watching = stop;
-    camera.scan(
-      async (image) => {
-        const packets = await this.#worker.scanQr(image);
-        this.stats.frames++;
-        if (packets.length) this.stats.codes++;
-        for (const packet of packets) {
-          this.stats.packets++;
-          for (const listener of this.#listeners) listener(packet);
-        }
-      },
-      stop.signal,
-      this.scanMaxEdge,
-    ).catch(() => {});
+    this.#wantsCamera = true;
+    this.#opening ??= this.#open();
+    await this.#opening;
+  }
+
+  async #open(): Promise<void> {
+    try {
+      const camera = await Camera.open(this.#video, this.facing);
+      if (!this.#wantsCamera || this.#camera) {
+        camera.close();
+        return;
+      }
+      const stop = new AbortController();
+      this.#camera = camera;
+      this.#watching = stop;
+      camera.scan(
+        async (image) => {
+          const packets = await this.#worker.scanQr(image);
+          this.stats.frames++;
+          if (packets.length) this.stats.codes++;
+          for (const packet of packets) {
+            this.stats.packets++;
+            for (const listener of this.#listeners) listener(packet);
+          }
+        },
+        stop.signal,
+        this.scanMaxEdge,
+      ).catch(() => {});
+    } finally {
+      this.#opening = undefined;
+    }
   }
 
   stopWatching(): void {
+    this.#wantsCamera = false;
     this.#watching?.abort();
     this.#camera?.close();
     this.#watching = undefined;

@@ -141,14 +141,14 @@ sendButton.addEventListener("click", async () => {
       `send: ${items.length} item(s), ${bundle.length} bytes, ${s.protocol}, listenEvery ${listenEvery}, window ${windowMs} ms`,
     );
     let estimated = false;
-    const result = await sendBundle(s, bundle, {
-      listenEvery,
-      windowMs,
+    const result = await sendBundle(bundle, {
+      listen: s,
+      sound: { channel: s, listenEvery, windowMs },
       signal: controller.signal,
-      onProgress: ({ transferId, k, sent }) => {
+      onProgress: ({ transferId, k, soundSent }) => {
         show("send-transfer", transferId);
         show("send-k", k);
-        show("send-sent", sent);
+        show("send-sent", soundSent);
         if (!estimated) {
           estimated = true;
           const n = Math.ceil(1.1 * k);
@@ -217,7 +217,8 @@ listenButton.addEventListener("click", async () => {
     const turnaround = turnaroundMs();
     log(`receive: listening, turnaround ${turnaround} ms`);
     let counts = "heard 0, rejected 0";
-    const received = await receiveBundle(s, {
+    const received = await receiveBundle({
+      sound: s,
       silenceMs: SILENCE_MS,
       turnaroundMs: turnaround,
       signal: controller.signal,

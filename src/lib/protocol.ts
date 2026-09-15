@@ -17,3 +17,6 @@ export const MAX_BUNDLE_BYTES = 16 * 1024 * 1024;
 
 /** decodeBundle aborts decompression once the output would exceed this. */
 export const MAX_INFLATED_BYTES = 64 * 1024 * 1024;
+
+export const SOUND_SAMPLE_RATE = 48_000;
+export const SOUND_SAMPLES_PER_BLOCK = 1024;

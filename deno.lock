@@ -2,7 +2,8 @@
   "version": "5",
   "specifiers": {
     "jsr:@std/assert@1": "1.0.19",
-    "jsr:@std/internal@^1.0.12": "1.0.14"
+    "jsr:@std/internal@^1.0.12": "1.0.14",
+    "npm:ggwave@0.4": "0.4.0"
   },
   "jsr": {
     "@std/assert@1.0.19": {
@@ -15,9 +16,15 @@
       "integrity": "291516b3d4c35024d6ffbc0a9df5bf4c64116e05b50012cf846710152d2ffdf7"
     }
   },
+  "npm": {
+    "ggwave@0.4.0": {
+      "integrity": "sha512-+sKq0aIEVJ7zHj4Vw+Sj/RPa91xp76ihaG5gsOKZ8ojM5+uUu3NFzAspozwBx/zeaThxP5VeIkA2bbsfWpUd2g=="
+    }
+  },
   "workspace": {
     "dependencies": [
-      "jsr:@std/assert@1"
+      "jsr:@std/assert@1",
+      "npm:ggwave@0.4"
     ]
   }
 }

@@ -1,5 +1,6 @@
 import type { FromWorker, ToWorker } from "@/lib/sound/codecWorkerProtocol.ts";
 import type { SoundProtocol } from "@/lib/sound/ggwave.ts";
+import type { RgbaImage } from "@/lib/qr/qrDecoder.ts";
 
 type PacketsListener = (packets: Uint8Array[]) => void;
 
@@ -8,6 +9,7 @@ export class CodecWorker {
   #worker: Worker;
   #nextId = 0;
   #encodes = new Map<number, (samples: Float32Array<ArrayBuffer>) => void>();
+  #qrScans = new Map<number, (packets: Uint8Array[]) => void>();
   #soundListeners = new Set<PacketsListener>();
   #ready: Promise<void>;
 
@@ -26,6 +28,10 @@ export class CodecWorker {
             return;
           case "soundPackets":
             for (const l of this.#soundListeners) l(m.packets);
+            return;
+          case "qrPackets":
+            this.#qrScans.get(m.id)?.(m.packets);
+            this.#qrScans.delete(m.id);
             return;
           case "error":
             console.error("codec worker:", m.message);
@@ -62,6 +68,17 @@ export class CodecWorker {
   /** Samples are transferred, so the caller must not reuse the buffer. */
   pushSound(samples: Float32Array<ArrayBuffer>): void {
     this.#send({ type: "sound", samples }, [samples.buffer]);
+  }
+
+  /** The image's pixels are transferred, so the caller must not reuse them. */
+  scanQr(image: RgbaImage): Promise<Uint8Array[]> {
+    const id = this.#nextId++;
+    return new Promise((resolve) => {
+      this.#qrScans.set(id, resolve);
+      const { width, height, data } = image;
+      const transfer = data.buffer instanceof ArrayBuffer ? [data.buffer] : [];
+      this.#send({ type: "qr", id, width, height, data }, transfer);
+    });
   }
 
   onSoundPackets(listener: PacketsListener): () => void {

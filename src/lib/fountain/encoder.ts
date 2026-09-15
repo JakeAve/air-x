@@ -1,5 +1,5 @@
 import { type Packet, PacketType } from "../packet.ts";
-import { DATA_BYTES, MAX_K, MAX_SYMBOL_ID } from "../protocol.ts";
+import { DATA_BYTES, MAX_BUNDLE_BYTES, MAX_SYMBOL_ID } from "../protocol.ts";
 import { blockCount, blockSet } from "./symbols.ts";
 
 export class Encoder {
@@ -9,10 +9,12 @@ export class Encoder {
   private nextSymbolId = 0;
 
   constructor(bundle: Uint8Array, transferId: number) {
-    this.k = blockCount(bundle.length);
-    if (this.k > MAX_K) {
-      throw new RangeError(`bundle needs ${this.k} blocks, max is ${MAX_K}`);
+    if (bundle.length > MAX_BUNDLE_BYTES) {
+      throw new RangeError(
+        `bundle is ${bundle.length} bytes, max is ${MAX_BUNDLE_BYTES}`,
+      );
     }
+    this.k = blockCount(bundle.length);
     this.#transferId = transferId;
     this.#blocks = new Uint8Array(this.k * DATA_BYTES);
     this.#blocks.set(bundle);

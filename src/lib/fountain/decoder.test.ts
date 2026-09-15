@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { decodeBundle, encodeBundle } from "../bundle.ts";
 import { type Packet, PacketType } from "../packet.ts";
-import { DATA_BYTES } from "../protocol.ts";
+import { DATA_BYTES, MAX_BUNDLE_BYTES } from "../protocol.ts";
 import { Decoder } from "./decoder.ts";
 import { Encoder } from "./encoder.ts";
 
@@ -111,6 +111,24 @@ Deno.test("locks onto the first data packet, not a Done", () => {
   assertEquals(decoder.push(done), undefined);
   assertEquals(decoder.transferId, undefined);
   assertEquals(decoder.k, undefined);
+});
+
+Deno.test("ignores a k=0 or oversize-k packet, then locks onto a real transfer", () => {
+  const bundle = randomBytes(seededRandom(800), 3 * DATA_BYTES);
+  const encoder = new Encoder(bundle, 42);
+  const decoder = new Decoder();
+  const real = encoder.next();
+
+  assertEquals(decoder.push({ ...real, k: 0 }), undefined);
+  assertEquals(decoder.k, undefined);
+
+  const oversizeK = Math.floor(MAX_BUNDLE_BYTES / DATA_BYTES) + 1;
+  assertEquals(decoder.push({ ...real, k: oversizeK }), undefined);
+  assertEquals(decoder.k, undefined);
+
+  assertEquals(decoder.push(real), undefined);
+  assertEquals(decoder.k, 3);
+  assertEquals(feed(decoder, stream(encoder, 3 * 3 + 20)), padded(bundle, 3));
 });
 
 Deno.test("a duplicate symbol is ignored", () => {

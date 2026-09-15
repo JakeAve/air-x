@@ -11,3 +11,9 @@ export const DENSE_MAX_K = 128;
 
 export const MAX_K = 2 ** 24 - 1;
 export const MAX_SYMBOL_ID = 2 ** 24 - 1;
+
+/** A decoder ignores any packet whose k implies a bundle bigger than this. */
+export const MAX_BUNDLE_BYTES = 16 * 1024 * 1024;
+
+/** decodeBundle aborts decompression once the output would exceed this. */
+export const MAX_INFLATED_BYTES = 64 * 1024 * 1024;

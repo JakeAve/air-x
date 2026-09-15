@@ -1,5 +1,5 @@
 import { type Packet, PacketType } from "../packet.ts";
-import { DATA_BYTES } from "../protocol.ts";
+import { DATA_BYTES, MAX_BUNDLE_BYTES } from "../protocol.ts";
 import { blockSet } from "./symbols.ts";
 
 // Bounds one elimination to about 512² bit operations; above it peeling alone
@@ -44,6 +44,9 @@ export class Decoder {
     if (packet.type === PacketType.Done) return undefined;
 
     if (this.#k === undefined) {
+      if (packet.k < 1 || packet.k * DATA_BYTES > MAX_BUNDLE_BYTES) {
+        return undefined;
+      }
       this.#transferId = packet.transferId;
       this.#k = packet.k;
       this.#blocks = new Uint8Array(packet.k * DATA_BYTES);

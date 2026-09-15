@@ -133,6 +133,26 @@ Deno.test("a manifest size mismatch throws BundleError", async () => {
   await assertRejects(() => decodeBundle(bytes), BundleError);
 });
 
+Deno.test("a decompression bomb is rejected", async () => {
+  const bomb = new Uint8Array(65 * 1024 * 1024);
+  const manifest = {
+    items: [{ name: "z", type: "application/octet-stream", size: bomb.length }],
+  };
+  const bytes = await buildRawBundle(manifest, bomb);
+  await assertRejects(() => decodeBundle(bytes), BundleError);
+});
+
+Deno.test("a null manifest entry throws BundleError", async () => {
+  const bytes = await buildRawBundle({ items: [null] }, new Uint8Array(0));
+  await assertRejects(() => decodeBundle(bytes), BundleError);
+});
+
+Deno.test("a manifest entry with a non-string name throws BundleError", async () => {
+  const manifest = { items: [{ name: 5, type: "text/plain", size: 0 }] };
+  const bytes = await buildRawBundle(manifest, new Uint8Array(0));
+  await assertRejects(() => decodeBundle(bytes), BundleError);
+});
+
 Deno.test("garbage bytes fail decompression as BundleError", async () => {
   const compressed = randomBytes(seededRandom(3), 32);
   const hash = new Uint8Array(

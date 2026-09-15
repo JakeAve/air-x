@@ -1,6 +1,6 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import { encodePacket, PacketType } from "../packet.ts";
-import { DATA_BYTES, MAX_K, MAX_SYMBOL_ID } from "../protocol.ts";
+import { DATA_BYTES, MAX_BUNDLE_BYTES, MAX_SYMBOL_ID } from "../protocol.ts";
 import { Encoder } from "./encoder.ts";
 import { blockSet } from "./symbols.ts";
 
@@ -75,7 +75,7 @@ Deno.test("next throws past MAX_SYMBOL_ID", () => {
   assertThrows(() => encoder.next(), RangeError);
 });
 
-Deno.test("a bundle over MAX_K blocks throws", () => {
-  const huge = { length: MAX_K * DATA_BYTES + 1 } as Uint8Array;
+Deno.test("a bundle over MAX_BUNDLE_BYTES throws", () => {
+  const huge = { length: MAX_BUNDLE_BYTES + 1 } as Uint8Array;
   assertThrows(() => new Encoder(huge, 1), RangeError);
 });

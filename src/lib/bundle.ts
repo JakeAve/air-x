@@ -1,6 +1,8 @@
 // Bundle wire format: u32 length | deflate-raw(u32 manifestLength | manifest
 // JSON | item bytes...) | sha256[0..8]. `length` counts the compressed bytes
 // plus the hash, so a fountain decoder's zero padding past it is ignored.
+import { MAX_INFLATED_BYTES } from "./protocol.ts";
+
 export interface Item {
   name: string;
   type: string;
@@ -44,7 +46,28 @@ async function inflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
   const stream = new Blob([asArrayBuffer(bytes)]).stream().pipeThrough(
     new DecompressionStream("deflate-raw"),
   );
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > MAX_INFLATED_BYTES) {
+      await reader.cancel();
+      throw new BundleError(
+        `bundle inflates past ${MAX_INFLATED_BYTES} bytes`,
+      );
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
 }
 
 async function sha256Prefix(bytes: Uint8Array): Promise<Uint8Array> {
@@ -145,8 +168,15 @@ export async function decodeBundle(bytes: Uint8Array): Promise<Item[]> {
   const items: Item[] = [];
   let offset = LENGTH_BYTES + manifestLength;
   for (const meta of manifest.items) {
+    if (
+      typeof meta !== "object" || meta === null ||
+      typeof meta.name !== "string" || typeof meta.type !== "string" ||
+      !Number.isInteger(meta.size) || meta.size < 0
+    ) {
+      throw new BundleError("malformed bundle manifest entry");
+    }
     const end = offset + meta.size;
-    if (!Number.isInteger(meta.size) || meta.size < 0 || end > inner.length) {
+    if (end > inner.length) {
       throw new BundleError(`item "${meta.name}" size mismatch`);
     }
     items.push({

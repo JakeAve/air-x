@@ -46,6 +46,9 @@ Wire facts (multi-byte fields big-endian):
   `PROTOCOL_VERSION` bump: sender and receiver derive block sets independently,
   and `symbols.test.ts` pins golden values. It avoids `Math.log`/`Math.sqrt`
   because engines may differ in the last bit.
+- `MAX_BUNDLE_BYTES` (16 MiB) caps `Encoder`'s input and the decoder ignores any
+  packet whose `k` implies a bigger bundle; `MAX_INFLATED_BYTES` (64 MiB) caps
+  `decodeBundle`'s decompression output.
 
 ## Workflow
 

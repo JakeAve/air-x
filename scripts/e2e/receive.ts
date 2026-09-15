@@ -1,11 +1,12 @@
-// Drives the diag page in headless Chromium with a fake microphone fed from
-// fixtures.ts, so the whole path from sound to a rendered item runs without
+// Drives the diag page in headless Chromium twice: once with a fake
+// microphone fed from fixtures.ts (sound-only receive), once with a fake
+// camera (QR-only receive), so both paths to a rendered item run without
 // hardware. Expects `deno task build` to have run.
 // Set CHROMIUM_PATH to use a Chromium outside Playwright's own cache.
 import { serveDir } from "@std/http";
 import { join } from "@std/path";
 import { chromium } from "playwright";
-import { FIXTURE_TEXT, writeFixtures } from "./fixtures.ts";
+import { FIXTURE_FILE_NAME, FIXTURE_TEXT, writeFixtures } from "./fixtures.ts";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
 const DIST = join(ROOT, "dist");
@@ -20,44 +21,72 @@ const server = Deno.serve(
 );
 const PORT = server.addr.port;
 
-const browser = await chromium.launch({
-  executablePath: Deno.env.get("CHROMIUM_PATH"),
-  args: [
-    "--use-fake-device-for-media-stream",
-    "--use-fake-ui-for-media-stream",
-    `--use-file-for-fake-audio-capture=${fixtures.wav}`,
-    "--autoplay-policy=no-user-gesture-required",
-  ],
-});
-
 const failures: string[] = [];
-try {
-  const context = await browser.newContext({ permissions: ["microphone"] });
-  const page = await context.newPage();
-  page.on("pageerror", (err) => failures.push(`page error: ${err.message}`));
-  page.on("console", (msg) => {
-    if (msg.type() === "error") failures.push(`console error: ${msg.text()}`);
-  });
 
-  await page.goto(`http://localhost:${PORT}/diag.html`);
-  const start = performance.now();
-  await page.click("#listen");
+async function receive(
+  label: string,
+  deviceArgs: string[],
+  permissions: string[],
+  expected: string,
+): Promise<void> {
+  const browser = await chromium.launch({
+    executablePath: Deno.env.get("CHROMIUM_PATH"),
+    args: [
+      "--use-fake-device-for-media-stream",
+      "--use-fake-ui-for-media-stream",
+      "--autoplay-policy=no-user-gesture-required",
+      ...deviceArgs,
+    ],
+  });
   try {
-    await page.waitForFunction(
-      (expected) =>
-        document.querySelector("#received-items")?.textContent?.includes(
-          expected,
-        ) ?? false,
-      FIXTURE_TEXT,
-      { timeout: 60_000 },
+    const context = await browser.newContext({ permissions });
+    const page = await context.newPage();
+    page.on(
+      "pageerror",
+      (err) => failures.push(`${label}: page error: ${err.message}`),
     );
-    const elapsed = ((performance.now() - start) / 1000).toFixed(1);
-    console.log(`receive: item heard after ${elapsed} s`);
-  } catch (err) {
-    failures.push(`receive: item not heard within 60 s (${err})`);
+    page.on("console", (msg) => {
+      if (msg.type() === "error") {
+        failures.push(`${label}: console error: ${msg.text()}`);
+      }
+    });
+
+    await page.goto(`http://localhost:${PORT}/diag.html`);
+    const start = performance.now();
+    await page.click("#listen");
+    try {
+      await page.waitForFunction(
+        (expected) =>
+          document.querySelector("#received-items")?.textContent?.includes(
+            expected,
+          ) ?? false,
+        expected,
+        { timeout: 60_000 },
+      );
+      const elapsed = ((performance.now() - start) / 1000).toFixed(1);
+      console.log(`${label} receive: ${elapsed} s`);
+    } catch (err) {
+      failures.push(`${label}: item not heard within 60 s (${err})`);
+    }
+  } finally {
+    await browser.close();
   }
+}
+
+try {
+  await receive(
+    "sound",
+    [`--use-file-for-fake-audio-capture=${fixtures.wav}`],
+    ["microphone"],
+    FIXTURE_TEXT,
+  );
+  await receive(
+    "qr",
+    [`--use-file-for-fake-video-capture=${fixtures.y4m}`],
+    ["microphone", "camera"],
+    FIXTURE_FILE_NAME,
+  );
 } finally {
-  await browser.close();
   await server.shutdown();
 }
 

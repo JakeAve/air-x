@@ -20,7 +20,7 @@ uses the same transports for games. Deno 2 + TypeScript, plain HTML and CSS.
 ```bash
 deno task dev     # build to dist/, serve on PORT (default 8444), rebuild on change
 deno task build   # build to dist/
-deno task e2e     # build, then headless-Chromium receive test (needs Playwright's Chromium: `deno run -A npm:playwright install chromium`)
+deno task e2e     # build, then headless-Chromium receive test: sound-only via fake mic, then QR-only via fake camera (needs Playwright's Chromium: `deno run -A npm:playwright install chromium`)
 ```
 
 `dev` serves HTTPS when `.certs/cert.pem` and `.certs/key.pem` exist (README).
@@ -29,9 +29,10 @@ deno task e2e     # build, then headless-Chromium receive test (needs Playwright
 
 - `scripts/build.ts` — copies `static/` to `dist/` and bundles `src/diag.ts`,
   `src/codecWorker.ts`, `src/captureWorklet.ts`. `scripts/dev.ts` serves it.
-- `scripts/e2e/` — `fixtures.ts` builds a WAV of a real fountain-coded transfer
-  for Chromium's fake microphone; `receive.ts` serves `dist/`, feeds it in
-  headless, and checks the diag page renders the item.
+- `scripts/e2e/` — `fixtures.ts` builds a WAV and a y4m of real fountain-coded
+  transfers for Chromium's fake microphone and fake camera; `receive.ts` serves
+  `dist/`, runs a sound-only receive and a QR-only receive headless, and checks
+  the diag page renders each item.
 - `static/` — `diag.html` and `styles.css`. Every asset path is relative.
 - `src/diag.ts` — diag page: send text and files by QR, sound, or both; receive
   from camera and mic at once; log. Defaults: QR on, 8 packets per code, 5 fps,

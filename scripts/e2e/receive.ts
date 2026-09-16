@@ -51,7 +51,7 @@ async function receive(
       }
     });
 
-    await page.goto(`http://localhost:${PORT}/diag.html`);
+    await page.goto(`http://localhost:${PORT}/diag.html#receive`);
     const start = performance.now();
     await page.click("#listen");
     try {

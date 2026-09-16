@@ -43,12 +43,15 @@ The pre-commit and pre-push hooks run `check` and `test`.
 
 ## Testing on phones
 
-Open `https://<host>:8444/diag.html` on two devices: type text or pick files on
-one and press Send, press Listen on the other. Send uses QR, sound, or both;
-Listen watches the camera and the microphone at once. The page logs loss,
-rejected packets, and when DONE is sent and heard. Browsers only allow the
-microphone on secure origins, so for local testing over Wi-Fi the dev server
-needs a certificate. With [mkcert](https://github.com/FiloSottile/mkcert):
+Open `https://<host>:8444/diag.html` on two devices. Tap Send on one, type text
+or pick files, and press Send; tap Receive on the other and press Listen. Send
+by picks QR, sound, or both (it defaults to both for bundles up to 2 KB, else
+QR) and the line under it estimates how long each channel would take. Tuning
+inputs live under Advanced on each screen, and Start over in the top strip
+returns to the first screen. The log at the bottom records loss, rejected
+packets, and when DONE is sent and heard. Browsers only allow the microphone on
+secure origins, so for local testing over Wi-Fi the dev server needs a
+certificate. With [mkcert](https://github.com/FiloSottile/mkcert):
 
 ```bash
 mkdir -p .certs
@@ -61,16 +64,18 @@ mkcert's root CA, `rootCA.pem` from the directory `mkcert -CAROOT` prints.
 
 ### QR between two phones
 
-1. On the receiver, leave Camera on and press Listen. The rear camera opens; use
-   Flip camera if the preview shows your face.
+1. On the receiver, leave Scan QR with camera on and press Listen. The rear
+   camera opens; use Flip camera under the preview if it shows your face.
 2. On the sender, turn screen brightness all the way up, type something, and
    press Send. The code fills the screen.
 3. Point the receiver's rear camera at the sender's screen, close enough that
    the code fills most of the preview, and hold steady.
-4. The receiver shows packets via QR, QR packets per second, and codes found per
-   frames scanned. If few frames yield a code, lower packets per code (smaller,
-   coarser codes) or fps (each code stays up longer), or raise scan max edge. If
-   nearly every frame decodes, raise packets per code or fps for throughput.
+4. The receiver shows blocks resolved, and under the preview the codes found per
+   frames scanned and new packets per second. If few frames yield a code, lower
+   packets per code (smaller, coarser codes) or codes per second (each code
+   stays up longer) under the sender's Advanced, or raise scan max edge under
+   the receiver's. If nearly every frame decodes, raise packets per code or
+   codes per second for throughput.
 
 DONE always goes back by sound, so keep both phones' volume up even when sending
 by QR only.

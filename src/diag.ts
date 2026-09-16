@@ -2,6 +2,7 @@ import { openDevices } from "@/adapters/pageLink.ts";
 import type { QrTransport } from "@/adapters/qrTransport.ts";
 import type { SoundTransport } from "@/adapters/soundTransport.ts";
 import { encodeBundle, type Item } from "@/lib/bundle.ts";
+import { blockCount } from "@/lib/fountain/symbols.ts";
 import { receiveBundle, sendBundle } from "@/lib/session.ts";
 import { PACKET_SECONDS } from "@/lib/protocol.ts";
 import type { QrEcc } from "@/lib/qr/qrEncoder.ts";
@@ -10,31 +11,38 @@ import type { SoundProtocol } from "@/lib/sound/ggwave.ts";
 const SILENCE_MS = 12_000;
 const SOUND_DEFAULT_MAX_BYTES = 2048;
 const RATE_WINDOW_MS = 5000;
+/** Packets the sender expects to need: k plus 10 % repair. */
+const OVERHEAD = 1.1;
 
 function $<T extends HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
 }
 
+const main = $<HTMLElement>("main");
+const sendForm = $<HTMLDivElement>("send-form");
+const sendRun = $<HTMLDivElement>("send-run");
+const sendTitle = $<HTMLHeadingElement>("send-title");
 const sendText = $<HTMLTextAreaElement>("send-text");
 const sendFiles = $<HTMLInputElement>("send-files");
-const qrToggle = $<HTMLInputElement>("qr-on");
+const sendEstimate = $<HTMLParagraphElement>("send-estimate");
 const packetsPerCodeInput = $<HTMLInputElement>("packets-per-code");
 const fpsInput = $<HTMLInputElement>("fps");
 const eccSelect = $<HTMLSelectElement>("ecc");
-const soundToggle = $<HTMLInputElement>("sound-on");
 const protocolSelect = $<HTMLSelectElement>("protocol");
 const listenEveryInput = $<HTMLInputElement>("listen-every");
 const windowMsInput = $<HTMLInputElement>("window-ms");
 const qrCanvas = $<HTMLCanvasElement>("qr-canvas");
+const sendButton = $<HTMLButtonElement>("send");
+const receiveForm = $<HTMLDivElement>("receive-form");
+const receiveRun = $<HTMLDivElement>("receive-run");
+const receiveTitle = $<HTMLHeadingElement>("receive-title");
 const cameraToggle = $<HTMLInputElement>("camera");
 const flipButton = $<HTMLButtonElement>("flip");
 const preview = $<HTMLVideoElement>("preview");
 const scanMaxEdgeInput = $<HTMLInputElement>("scan-max-edge");
 const turnaroundMsInput = $<HTMLInputElement>("turnaround-ms");
-const sendButton = $<HTMLButtonElement>("send");
-const sendStopButton = $<HTMLButtonElement>("send-stop");
+const rxCamera = $<HTMLParagraphElement>("rx-camera");
 const listenButton = $<HTMLButtonElement>("listen");
-const listenStopButton = $<HTMLButtonElement>("listen-stop");
 const receivedItems = $<HTMLUListElement>("received-items");
 const logEl = $<HTMLPreElement>("log");
 
@@ -51,13 +59,46 @@ function seconds(ms: number): string {
   return `${(ms / 1000).toFixed(1)} s`;
 }
 
+function about(s: number): string {
+  if (s < 1) return "under 1 s";
+  if (s < 90) return `about ${Math.round(s)} s`;
+  if (s < 5400) return `about ${Math.round(s / 60)} min`;
+  return `about ${(s / 3600).toFixed(1)} h`;
+}
+
+function size(bytes: number): string {
+  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
+}
+
 function positive(input: HTMLInputElement, fallback: number): number {
   return Math.max(0, Number(input.value) || 0) || fallback;
 }
 
+function bar(id: string, fraction: number) {
+  $(id).style.width = `${Math.min(100, Math.round(fraction * 100))}%`;
+}
+
+// Screens: the hash picks one; leaving a screen stops whatever it was doing.
+const SCREENS = ["home", "send", "receive"];
+let running: AbortController | undefined;
+
+function showScreen() {
+  const name = location.hash.slice(1);
+  const screen = SCREENS.includes(name) ? name : "home";
+  running?.abort();
+  main.dataset.screen = screen;
+  for (const id of SCREENS) $(`screen-${id}`).hidden = id !== screen;
+}
+addEventListener("hashchange", showScreen);
+showScreen();
+
 const protocol = () => protocolSelect.value as SoundProtocol;
 
 const turnaroundMs = () => Math.max(0, Number(turnaroundMsInput.value) || 0);
+
+const sendBy = () =>
+  (document.querySelector('input[name="send-by"]:checked') as HTMLInputElement)
+    .value;
 
 let windowEdited = false;
 let turnaroundEdited = false;
@@ -109,14 +150,35 @@ function getDevices(): Promise<Devices> {
   return opening;
 }
 
-function ticker(id: string, start: number): () => void {
-  const timer = setInterval(
-    () => show(id, seconds(performance.now() - start)),
-    250,
-  );
+function ticker(id: string, start: number, suffix = ""): () => void {
+  const tick = () => show(id, seconds(performance.now() - start) + suffix);
+  const timer = setInterval(tick, 250);
+  tick();
   return () => {
     clearInterval(timer);
-    show(id, seconds(performance.now() - start));
+    tick();
+  };
+}
+
+/** Packets per second each channel manages with the current settings. */
+function rates() {
+  const packetsPerCode = Math.max(
+    1,
+    Math.round(positive(packetsPerCodeInput, 8)),
+  );
+  const fps = positive(fpsInput, 5);
+  const listenEvery = Math.max(1, Math.round(positive(listenEveryInput, 8)));
+  const windowMs = Math.max(0, Number(windowMsInput.value) || 0);
+  const gapMs = devices?.sound.gapMs ?? 150;
+  const soundPerSecond = listenEvery * 1000 /
+    (listenEvery * (PACKET_SECONDS[protocol()] * 1000 + gapMs) + windowMs);
+  return {
+    packetsPerCode,
+    fps,
+    listenEvery,
+    windowMs,
+    qrPerSecond: packetsPerCode * fps,
+    soundPerSecond,
   };
 }
 
@@ -139,10 +201,12 @@ async function collectItems(): Promise<Item[]> {
   return items;
 }
 
-let soundEdited = false;
+let sendByEdited = false;
 let sizing = 0;
 let sizeTimer: ReturnType<typeof setTimeout> | undefined;
-soundToggle.addEventListener("change", () => soundEdited = true);
+for (const radio of document.querySelectorAll('input[name="send-by"]')) {
+  radio.addEventListener("change", () => sendByEdited = true);
+}
 
 function itemsChanged() {
   clearTimeout(sizeTimer);
@@ -151,34 +215,45 @@ function itemsChanged() {
     const items = await collectItems();
     const bytes = items.length ? (await encodeBundle(items)).length : 0;
     if (run !== sizing) return;
-    show("send-size", bytes ? `${bytes} B` : "–");
-    if (!soundEdited) soundToggle.checked = bytes <= SOUND_DEFAULT_MAX_BYTES;
+    if (!bytes) {
+      sendEstimate.textContent = "Nothing to send yet";
+      return;
+    }
+    if (!sendByEdited) {
+      const pick = bytes <= SOUND_DEFAULT_MAX_BYTES ? "both" : "qr";
+      (document.querySelector(
+        `input[name="send-by"][value="${pick}"]`,
+      ) as HTMLInputElement).checked = true;
+    }
+    const n = Math.ceil(OVERHEAD * blockCount(bytes));
+    const { qrPerSecond, soundPerSecond } = rates();
+    sendEstimate.textContent = `${size(bytes)} · ${
+      about(n / qrPerSecond)
+    } by QR · ${about(n / soundPerSecond)} by sound`;
   }, 300);
 }
-sendText.addEventListener("input", itemsChanged);
-sendFiles.addEventListener("change", itemsChanged);
+sendForm.addEventListener("input", itemsChanged);
 
 sendButton.addEventListener("click", async () => {
+  if (running) {
+    running.abort();
+    return;
+  }
   // openDevices first, synchronously: iOS only lets an AudioContext made inside the gesture run.
   const opened = getDevices();
-  sendButton.disabled = true;
   const controller = new AbortController();
-  const onStop = () => controller.abort();
-  sendStopButton.addEventListener("click", onStop, { once: true });
-  sendStopButton.disabled = false;
+  running = controller;
   let stopTicker: (() => void) | undefined;
+  let result: "done" | "stopped" | undefined;
   try {
     const [{ sound, qr }, items] = await Promise.all([opened, collectItems()]);
     if (!items.length) {
       log("send: nothing to send");
       return;
     }
-    const useQr = qrToggle.checked;
-    const useSound = soundToggle.checked;
-    if (!useQr && !useSound) {
-      log("send: nothing to send by");
-      return;
-    }
+    const by = sendBy();
+    const useQr = by !== "sound";
+    const useSound = by !== "qr";
     try {
       await sound.listen();
     } catch (err) {
@@ -187,17 +262,31 @@ sendButton.addEventListener("click", async () => {
     sound.protocol = protocol();
     qr.ecc = eccSelect.value as QrEcc;
     const bundle = await encodeBundle(items);
-    const listenEvery = Math.max(1, Math.round(positive(listenEveryInput, 8)));
-    const windowMs = Math.max(0, Number(windowMsInput.value) || 0);
-    const packetsPerCode = Math.max(
-      1,
-      Math.round(positive(packetsPerCodeInput, 8)),
-    );
-    const fps = positive(fpsInput, 5);
-    show("send-size", `${bundle.length} B`);
+    const {
+      packetsPerCode,
+      fps,
+      listenEvery,
+      windowMs,
+      qrPerSecond,
+      soundPerSecond,
+    } = rates();
+    const perSecond = (useQr ? qrPerSecond : 0) +
+      (useSound ? soundPerSecond : 0);
+    const n = Math.ceil(OVERHEAD * blockCount(bundle.length));
+    sendTitle.textContent = "sending";
+    sendForm.hidden = true;
+    sendRun.hidden = false;
     qrCanvas.hidden = !useQr;
+    bar("send-bar", 0);
+    show("send-count", `0 of ${n} packets`);
+    sendButton.textContent = "Stop";
+    sendButton.classList.remove("primary");
     const start = performance.now();
-    stopTicker = ticker("send-elapsed", start);
+    stopTicker = ticker(
+      "send-time",
+      start,
+      ` of ${about(n / perSecond)}`,
+    );
     log(
       `send: ${items.length} item(s), ${bundle.length} bytes` +
         (useQr ? `, qr ${packetsPerCode}/code @ ${fps} fps ${qr.ecc}` : "") +
@@ -205,31 +294,18 @@ sendButton.addEventListener("click", async () => {
           ? `, sound ${sound.protocol} listenEvery ${listenEvery} window ${windowMs} ms`
           : ""),
     );
-    const soundPerSecond = useSound
-      ? listenEvery * 1000 /
-        (listenEvery * (PACKET_SECONDS[sound.protocol] * 1000 + sound.gapMs) +
-          windowMs)
-      : 0;
-    const perSecond = (useQr ? packetsPerCode * fps : 0) + soundPerSecond;
-    let estimated = false;
-    const result = await sendBundle(bundle, {
+    let announced = false;
+    result = await sendBundle(bundle, {
       listen: sound,
       sound: useSound ? { channel: sound, listenEvery, windowMs } : undefined,
       qr: useQr ? { display: qr, packetsPerCode, fps } : undefined,
       signal: controller.signal,
-      onProgress: ({ transferId, k, soundSent, qrSent, codes }) => {
-        show("send-transfer", transferId);
-        show("send-k", k);
-        show("send-sound-sent", soundSent);
-        show("send-qr-sent", qrSent);
-        show("send-codes", codes);
-        if (!estimated) {
-          estimated = true;
-          const n = Math.ceil(1.1 * k);
-          show(
-            "send-estimate",
-            `${n} packets ≈ ${seconds(n / perSecond * 1000)}`,
-          );
+      onProgress: ({ transferId, k, soundSent, qrSent }) => {
+        const sent = soundSent + qrSent;
+        bar("send-bar", sent / n);
+        show("send-count", `${sent} of ${n} packets`);
+        if (!announced) {
+          announced = true;
           log(`send: transfer ${transferId}, k ${k}`);
         }
       },
@@ -240,14 +316,23 @@ sendButton.addEventListener("click", async () => {
         ? `send: DONE heard after ${elapsed}`
         : `send: stopped after ${elapsed}`,
     );
+    if (result === "done") {
+      bar("send-bar", 1);
+      stopTicker();
+      stopTicker = undefined;
+      show("send-time", `${elapsed} · DONE heard`);
+    }
   } catch (err) {
     log(`send failed: ${err}`);
   } finally {
     stopTicker?.();
+    running = undefined;
     qrCanvas.hidden = true;
-    sendStopButton.removeEventListener("click", onStop);
-    sendStopButton.disabled = true;
-    sendButton.disabled = false;
+    sendRun.hidden = result !== "done";
+    sendForm.hidden = false;
+    sendTitle.textContent = result === "done" ? "sent" : "send";
+    sendButton.textContent = "Send";
+    sendButton.classList.add("primary");
   }
 });
 
@@ -260,17 +345,20 @@ function renderItem(item: Item) {
   });
   const url = URL.createObjectURL(blob);
   objectUrls.push(url);
-  const meta = document.createElement("span");
-  meta.textContent = `${item.name} · ${item.type} · ${item.bytes.length} B`;
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  const name = document.createElement("span");
+  name.textContent = `${item.name} · ${item.type} · ${size(item.bytes.length)}`;
   const link = document.createElement("a");
   link.href = url;
   link.download = item.name;
   link.textContent = "Download";
-  li.append(meta, link);
+  meta.append(name, link);
+  li.append(meta);
   if (item.type.startsWith("text/")) {
-    const preview = document.createElement("pre");
-    preview.textContent = new TextDecoder().decode(item.bytes);
-    li.append(preview);
+    const text = document.createElement("pre");
+    text.textContent = new TextDecoder().decode(item.bytes);
+    li.append(text);
   }
   receivedItems.append(li);
 }
@@ -284,14 +372,18 @@ async function watchCamera(qr: QrTransport) {
   } catch (err) {
     log(`camera failed: ${err}`);
   }
-  preview.hidden = !qr.watching;
+  preview.hidden = flipButton.hidden = rxCamera.hidden = !qr.watching;
+}
+
+function closeCamera() {
+  devices?.qr.stopWatching();
+  preview.hidden = flipButton.hidden = rxCamera.hidden = true;
 }
 
 cameraToggle.addEventListener("change", () => {
   if (!devices) return;
   if (!cameraToggle.checked) {
-    devices.qr.stopWatching();
-    preview.hidden = true;
+    closeCamera();
   } else if (scanningQr) {
     watchCamera(devices.qr);
   }
@@ -312,15 +404,24 @@ flipButton.addEventListener("click", async () => {
 });
 
 listenButton.addEventListener("click", async () => {
+  if (running) {
+    running.abort();
+    return;
+  }
   // openDevices first, synchronously: iOS only lets an AudioContext made inside the gesture run.
   const opened = getDevices();
-  listenButton.disabled = true;
   const controller = new AbortController();
-  const onStop = () => controller.abort();
-  listenStopButton.addEventListener("click", onStop, { once: true });
-  listenStopButton.disabled = false;
+  running = controller;
   let stopTicker: (() => void) | undefined;
   let stopPolling: (() => void) | undefined;
+  let received = false;
+  receiveTitle.textContent = "listening";
+  receiveForm.hidden = true;
+  receiveRun.hidden = false;
+  listenButton.textContent = "Stop";
+  listenButton.classList.remove("primary");
+  bar("rx-bar", 0);
+  show("rx-count", "waiting for a transfer");
   try {
     const { sound, qr } = await opened;
     scanningQr = cameraToggle.checked;
@@ -330,7 +431,7 @@ listenButton.addEventListener("click", async () => {
     receivedItems.replaceChildren();
     Object.assign(qr.stats, { frames: 0, codes: 0, packets: 0 });
     const start = performance.now();
-    stopTicker = ticker("rx-elapsed", start);
+    stopTicker = ticker("rx-time", start);
     let sourceNew = 0;
     const samples: [time: number, sourceNew: number][] = [];
     const poll = setInterval(() => {
@@ -339,8 +440,10 @@ listenButton.addEventListener("click", async () => {
       while (now - samples[0][0] > RATE_WINDOW_MS) samples.shift();
       const [then, newThen] = samples[0];
       const rate = now > then ? (sourceNew - newThen) * 1000 / (now - then) : 0;
-      show("rx-qr-rate", `${rate.toFixed(1)}/s`);
-      show("rx-codes", `${qr.stats.codes} / ${qr.stats.frames}`);
+      rxCamera.textContent =
+        `${qr.stats.codes} codes in ${qr.stats.frames} frames · ${
+          rate.toFixed(1)
+        } new packets/s`;
     }, 500);
     stopPolling = () => clearInterval(poll);
     const turnaround = turnaroundMs();
@@ -350,7 +453,7 @@ listenButton.addEventListener("click", async () => {
       }, turnaround ${turnaround} ms`,
     );
     let counts = "sound 0, qr 0, rejected 0";
-    const received = await receiveBundle({
+    const done = await receiveBundle({
       sound,
       sources: scanningQr ? [qr] : undefined,
       silenceMs: SILENCE_MS,
@@ -367,17 +470,18 @@ listenButton.addEventListener("click", async () => {
       ) => {
         sourceNew = qrNew;
         counts = `sound ${soundHeard}, qr ${qrHeard}, rejected ${rejected}`;
-        show("rx-sound-heard", soundHeard);
-        show("rx-qr-heard", qrHeard);
-        show("rx-rejected", rejected);
-        show(
-          "rx-transfers",
-          transfers.map((t) => `${t.transferId} ${t.resolved}/${t.k}`).join(
-            ", ",
-          ) || "–",
+        const t = transfers.reduce(
+          (best, t) => t.resolved > best.resolved ? t : best,
+          transfers[0],
         );
+        if (t) {
+          bar("rx-bar", t.resolved / t.k);
+          show("rx-count", `${t.resolved} of ${t.k} blocks`);
+        }
       },
       onComplete: ({ transferId, items }) => {
+        received = true;
+        bar("rx-bar", 1);
         log(
           `receive: transfer ${transferId} complete after ${
             seconds(performance.now() - start)
@@ -385,16 +489,20 @@ listenButton.addEventListener("click", async () => {
         );
         items.forEach(renderItem);
       },
-      onDone: (transferId) =>
+      onDone: (transferId) => {
+        stopTicker?.();
+        stopTicker = undefined;
+        show("rx-time", `${seconds(performance.now() - start)} · DONE sent`);
         log(
           `receive: DONE sent for ${transferId} after ${
             seconds(performance.now() - start)
           }`,
-        ),
+        );
+      },
     });
     log(
-      received
-        ? `receive: finished transfer ${received.transferId}, ${counts}`
+      done
+        ? `receive: finished transfer ${done.transferId}, ${counts}`
         : `receive: stopped with nothing received, ${counts}`,
     );
   } catch (err) {
@@ -402,11 +510,13 @@ listenButton.addEventListener("click", async () => {
   } finally {
     stopTicker?.();
     stopPolling?.();
+    running = undefined;
     scanningQr = false;
-    devices?.qr.stopWatching();
-    preview.hidden = true;
-    listenStopButton.removeEventListener("click", onStop);
-    listenStopButton.disabled = true;
-    listenButton.disabled = false;
+    closeCamera();
+    receiveRun.hidden = !received;
+    receiveForm.hidden = false;
+    receiveTitle.textContent = received ? "received" : "receive";
+    listenButton.textContent = "Listen";
+    listenButton.classList.add("primary");
   }
 });

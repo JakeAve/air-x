@@ -10,7 +10,8 @@
   <body>
     <main>
       <h1>Air X diagnostics</h1>
-      <p class="muted">Send text and files between two devices by sound.</p>
+      <p
+        class="muted">Send text and files between two devices by QR code, sound, or both.</p>
 
       <section class="card">
         <h2>Send</h2>
@@ -18,35 +19,65 @@
           <textarea id="send-text" rows="3" placeholder="hello air x"></textarea>
         </label>
         <label>Files <input id="send-files" type="file" multiple /></label>
-        <label>Sound protocol
-          <select id="protocol">
-            <option value="fastest">fastest</option>
-            <option value="fast">fast</option>
-            <option value="normal">normal</option>
-            <option value="ultrasound-fastest">ultrasound fastest</option>
-            <option value="ultrasound-fast">ultrasound fast</option>
-            <option value="ultrasound-normal">ultrasound normal</option>
-          </select>
-        </label>
-        <div class="row">
-          <label>Listen every
-            <input id="listen-every" type="number" inputmode="numeric" min="1" step="1" value="8" />
+        <p class="muted">Bundle size <span id="send-size">–</span></p>
+        <fieldset>
+          <label
+            class="toggle"><input id="qr-on" type="checkbox" checked /> QR code</label>
+          <div class="row">
+            <label>Packets per code
+              <input id="packets-per-code" type="number" inputmode="numeric" min="1" step="1" value="8" />
+            </label>
+            <label>Codes per second
+              <input id="fps" type="number" inputmode="decimal" min="0.5" step="0.5" value="5" />
+            </label>
+          </div>
+          <label>Error correction
+            <select id="ecc">
+              <option value="low">low</option>
+              <option value="medium" selected>medium</option>
+              <option value="quartile">quartile</option>
+              <option value="high">high</option>
+            </select>
           </label>
-          <label>Window ms
-            <input id="window-ms" type="number" inputmode="numeric" min="0" step="50" />
+        </fieldset>
+        <fieldset>
+          <label
+            class="toggle"><input id="sound-on" type="checkbox" checked /> Sound</label>
+          <label>Sound protocol
+            <select id="protocol">
+              <option value="fastest">fastest</option>
+              <option value="fast">fast</option>
+              <option value="normal">normal</option>
+              <option value="ultrasound-fastest">ultrasound fastest</option>
+              <option value="ultrasound-fast">ultrasound fast</option>
+              <option value="ultrasound-normal">ultrasound normal</option>
+            </select>
           </label>
-        </div>
+          <div class="row">
+            <label>Listen every
+              <input id="listen-every" type="number" inputmode="numeric" min="1" step="1" value="8" />
+            </label>
+            <label>Window ms
+              <input id="window-ms" type="number" inputmode="numeric" min="0" step="50" />
+            </label>
+          </div>
+        </fieldset>
         <div class="row">
           <button id="send">Send</button>
           <button id="send-stop" disabled>Stop</button>
         </div>
+        <canvas id="qr-canvas" class="qr" hidden></canvas>
         <dl class="facts">
           <dt>Transfer</dt>
           <dd id="send-transfer">–</dd>
           <dt>k</dt>
           <dd id="send-k">–</dd>
-          <dt>Packets sent</dt>
-          <dd id="send-sent">–</dd>
+          <dt>Sound packets</dt>
+          <dd id="send-sound-sent">–</dd>
+          <dt>QR packets</dt>
+          <dd id="send-qr-sent">–</dd>
+          <dt>Codes shown</dt>
+          <dd id="send-codes">–</dd>
           <dt>Elapsed</dt>
           <dd id="send-elapsed">–</dd>
           <dt>Estimate</dt>
@@ -56,16 +87,35 @@
 
       <section class="card">
         <h2>Receive</h2>
-        <label>Turnaround ms
-          <input id="turnaround-ms" type="number" inputmode="numeric" min="0" step="50" />
-        </label>
+        <div class="row">
+          <label
+            class="toggle"><input id="camera" type="checkbox" checked /> Camera</label>
+          <button id="flip" class="secondary">Flip camera</button>
+        </div>
+        <video id="preview" class="preview" muted playsinline hidden></video>
+        <div class="row">
+          <label>Scan max edge
+            <input id="scan-max-edge" type="number" inputmode="numeric" min="320" step="160" value="1280" />
+          </label>
+          <label>Turnaround ms
+            <input id="turnaround-ms" type="number" inputmode="numeric" min="0" step="50" />
+          </label>
+        </div>
+        <p
+          class="muted">The microphone is always on while listening: DONE goes back by sound.</p>
         <div class="row">
           <button id="listen">Listen</button>
           <button id="listen-stop" disabled>Stop</button>
         </div>
         <dl class="facts">
-          <dt>Heard</dt>
-          <dd id="rx-heard">–</dd>
+          <dt>Via sound</dt>
+          <dd id="rx-sound-heard">–</dd>
+          <dt>QR packets decoded (with repeats)</dt>
+          <dd id="rx-qr-heard">–</dd>
+          <dt>new QR packets/s</dt>
+          <dd id="rx-qr-rate">–</dd>
+          <dt>Codes / frames</dt>
+          <dd id="rx-codes">–</dd>
           <dt>Rejected</dt>
           <dd id="rx-rejected">–</dd>
           <dt>Transfers</dt>

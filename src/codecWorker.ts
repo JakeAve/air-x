@@ -2,6 +2,7 @@
 import type { FromWorker, ToWorker } from "@/lib/sound/codecWorkerProtocol.ts";
 import { SoundEncoder } from "@/lib/sound/soundEncoder.ts";
 import { SoundDecoder } from "@/lib/sound/soundDecoder.ts";
+import { decodeQrPackets } from "@/lib/qr/qrDecoder.ts";
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -38,6 +39,11 @@ function handle(message: ToWorker) {
       if (!decoder) return;
       const packets = decoder.push(message.samples);
       if (packets.length) post({ type: "soundPackets", packets });
+      return;
+    }
+    case "qr": {
+      const packets = decodeQrPackets(message);
+      post({ type: "qrPackets", id: message.id, packets });
       return;
     }
   }

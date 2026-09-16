@@ -12,15 +12,15 @@ uses the same transports for games. Deno 2 + TypeScript, plain HTML and CSS.
   `TextEncoder`).
 - **Tests:** `deno test`, colocated `*.test.ts`, seeded PRNGs so every run is
   identical.
-- **Imports:** `@std/assert`, `@std/fs`, `@std/path`, `@std/http`, `ggwave`, and
-  `@/` for `./src/`.
+- **Imports:** `@std/assert`, `@std/fs`, `@std/path`, `@std/http`, `ggwave`,
+  `qr` (encode from `qr`, decode from `qr/decode.js`), and `@/` for `./src/`.
 
 ## Commands
 
 ```bash
 deno task dev     # build to dist/, serve on PORT (default 8444), rebuild on change
 deno task build   # build to dist/
-deno task e2e     # build, then headless-Chromium receive test (needs Playwright's Chromium: `deno run -A npm:playwright install chromium`)
+deno task e2e     # build, then headless-Chromium receive test: sound-only via fake mic, then QR-only via fake camera (needs Playwright's Chromium: `deno run -A npm:playwright install chromium`)
 ```
 
 `dev` serves HTTPS when `.certs/cert.pem` and `.certs/key.pem` exist (README).
@@ -29,14 +29,21 @@ deno task e2e     # build, then headless-Chromium receive test (needs Playwright
 
 - `scripts/build.ts` — copies `static/` to `dist/` and bundles `src/diag.ts`,
   `src/codecWorker.ts`, `src/captureWorklet.ts`. `scripts/dev.ts` serves it.
-- `scripts/e2e/` — `fixtures.ts` builds a WAV of a real fountain-coded transfer
-  for Chromium's fake microphone; `receive.ts` serves `dist/`, feeds it in
-  headless, and checks the diag page renders the item.
+- `scripts/e2e/` — `fixtures.ts` builds a WAV and a y4m of real fountain-coded
+  transfers for Chromium's fake microphone and fake camera; `receive.ts` serves
+  `dist/`, runs a sound-only receive and a QR-only receive headless, and checks
+  the diag page renders each item.
 - `static/` — `diag.html` and `styles.css`. Every asset path is relative.
-- `src/diag.ts` — diag page: send text and files by sound, receive, log.
-- `src/adapters/` — the only browser-API code besides the entries:
-  `pageSound.ts` (`openSound`), `soundTransport.ts` (`SoundTransport`, a
-  `PacketChannel`), `codecWorker.ts`, `microphone.ts`, `speaker.ts`.
+- `src/diag.ts` — diag page: send text and files by QR, sound, or both; receive
+  from camera and mic at once; log. Defaults: QR on, 8 packets per code, 5 fps,
+  ECC medium; sound on only when the bundle is at most 2048 bytes (until toggled
+  by hand); camera on, scan max edge 1280; silence 12 s.
+- `src/adapters/` — the only browser-API code besides the entries: `pageLink.ts`
+  (`openDevices`: one codec worker shared by both transports),
+  `soundTransport.ts` (`SoundTransport`, a `PacketChannel`), `qrTransport.ts`
+  (`QrTransport`, a `PacketSource` and `PacketDisplay`), `camera.ts`,
+  `screen.ts` (draws a code on a canvas), `codecWorker.ts`, `microphone.ts`,
+  `speaker.ts`.
 - `src/codecWorker.ts` — worker hosting ggwave, so the page bundle carries no
   WASM. Page code imports `PACKET_SECONDS` from `protocol.ts`, not `ggwave.ts`.
 - `src/captureWorklet.ts` — AudioWorklet forwarding mic samples in 1024-sample
@@ -59,11 +66,21 @@ gitignored).
 - `fountain/decoder.ts` — `Decoder`: peeling, then Gaussian elimination over
   GF(2) when peeling stalls; returns the zero-padded bundle.
 - `abort.ts` — `sleep` and `aborted` on an `AbortSignal`.
-- `channel.ts` — `PacketChannel`: `send(packets, signal)` and `onPacket`.
+- `channel.ts` — `PacketSource` (`onPacket`), `PacketChannel` (adds
+  `send(packets, signal)`), `PacketDisplay` (`show`, `clear`).
 - `receiver.ts` — `Receiver`: one decoder per interleaved transfer, evicts stale
   ones.
-- `session.ts` — `sendBundle` (bursts of `listenEvery`, then a listen window,
-  until DONE) and `receiveBundle` (sends DONE, finishes after `silenceMs`).
+- `session.ts` — `sendBundle` (sound bursts of `listenEvery` then a listen
+  window, and QR codes of `packetsPerCode` at `fps`, from one encoder until DONE
+  is heard) and `receiveBundle` (sound plus any `sources`; sends DONE by sound).
+  Silence rules count sound only: once complete, DONE goes out at once if no
+  sound from the transfer was heard within `silenceMs`, else after `silenceMs`
+  of sound silence or on a `DataListen`. After DONE, packets of that transfer
+  (QR included) mean the sender missed it, so silence re-sends DONE; silence
+  with nothing heard since DONE finishes.
+- `qr/` — `qrEncoder.ts` (packets into one byte-mode code, `QrEcc`),
+  `qrDecoder.ts` (RGBA frame to packets), `bytesAsText.ts`, `rasterize.ts`
+  (`QR_COLORS`, test images).
 - `sound/` — ggwave wrapper (`ggwave.ts`), `SoundEncoder`, `SoundDecoder`, and
   the codec worker's message types.
 
@@ -96,6 +113,8 @@ Wire facts (multi-byte fields big-endian):
   mode.
 - The receiver waits `turnaroundMs` before each DONE: after an ultrasound burst
   the sender's mic takes hundreds of ms to reopen and would miss it.
+- The camera, like the mic, is opened by `watch()` and left rolling for a leg;
+  the diag page closes it when a receive ends.
 - Airgap's service-worker cache gotcha does not apply: there is no service
   worker.
 

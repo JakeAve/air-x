@@ -19,7 +19,8 @@
     "jsr:@std/streams@^1.1.1": "1.1.2",
     "npm:ggwave@0.4": "0.4.0",
     "npm:playwright@*": "1.63.0",
-    "npm:playwright@^1.63.0": "1.63.0"
+    "npm:playwright@^1.63.0": "1.63.0",
+    "npm:qr@0.7": "0.7.0"
   },
   "jsr": {
     "@std/assert@1.0.19": {
@@ -94,6 +95,9 @@
         "playwright-core"
       ],
       "bin": true
+    },
+    "qr@0.7.0": {
+      "integrity": "sha512-/VrrACmOAwZVipuRITwfEwOL5oAMEHH5PTmBWaGtlTom2Thxaa+rhmna4zU9PRN2uLw2wdccbkHOLGZb1Q9SdA=="
     }
   },
   "workspace": {
@@ -103,7 +107,8 @@
       "jsr:@std/http@1",
       "jsr:@std/path@1",
       "npm:ggwave@0.4",
-      "npm:playwright@^1.63.0"
+      "npm:playwright@^1.63.0",
+      "npm:qr@0.7"
     ]
   }
 }

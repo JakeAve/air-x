@@ -2,9 +2,9 @@
 
 Air exchange: send contacts, text, images, and files to the person right next to
 you, with no server, no account, and no network. Two devices pass data directly
-by sound ([ggwave](https://github.com/ggerganov/ggwave)) or by QR code. The two
-channels are interchangeable, so a noisy room or a broken camera never blocks a
-transfer.
+by sound ([ggwave](https://github.com/ggerganov/ggwave) or
+[libquiet](https://github.com/quiet/quiet-js)) or by QR code. The two channels
+are interchangeable, so a noisy room or a broken camera never blocks a transfer.
 
 A sibling of [airgap](https://github.com/JakeAve/airgap), which uses the same
 transports for two-player games. Built with Deno, TypeScript, and plain HTML and

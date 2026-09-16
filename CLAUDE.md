@@ -1,8 +1,9 @@
 # Air X
 
-Send contacts, text, images, and files to a nearby device by ggwave sound or QR
-code, no server. Sibling of [airgap](https://github.com/JakeAve/airgap), which
-uses the same transports for games. Deno 2 + TypeScript, plain HTML and CSS.
+Send contacts, text, images, and files to a nearby device by sound (ggwave or
+libquiet) or QR code, no server. Sibling of
+[airgap](https://github.com/JakeAve/airgap), which uses the same transports for
+games. Deno 2 + TypeScript, plain HTML and CSS.
 
 ## Stack
 
@@ -20,7 +21,7 @@ uses the same transports for games. Deno 2 + TypeScript, plain HTML and CSS.
 ```bash
 deno task dev     # build to dist/, serve on PORT (default 8444), rebuild on change
 deno task build   # build to dist/
-deno task e2e     # build, then headless-Chromium receive test: sound-only via fake mic, then QR-only via fake camera (needs Playwright's Chromium: `deno run -A npm:playwright install chromium`)
+deno task e2e     # build, then headless-Chromium receive test: sound-only via fake mic (ggwave, then quiet), then QR-only via fake camera (needs Playwright's Chromium: `deno run -A npm:playwright install chromium`)
 ```
 
 `dev` serves HTTPS when `.certs/cert.pem` and `.certs/key.pem` exist (README).
@@ -31,8 +32,8 @@ deno task e2e     # build, then headless-Chromium receive test: sound-only via f
   `src/codecWorker.ts`, `src/captureWorklet.ts`. `scripts/dev.ts` serves it.
 - `scripts/e2e/` — `fixtures.ts` builds a WAV and a y4m of real fountain-coded
   transfers for Chromium's fake microphone and fake camera; `receive.ts` serves
-  `dist/`, runs a sound-only receive and a QR-only receive headless, and checks
-  the diag page renders each item.
+  `dist/`, runs a ggwave sound-only receive, a quiet sound-only receive, and a
+  QR-only receive headless, and checks the diag page renders each item.
 - `static/` — `diag.html`, `styles.css`, and `fonts/open-sans.woff2` (variable
   weight, OFL). Every asset path is relative. Visual rules live in
   `.claude/skills/air-x-style/SKILL.md`; read it before touching markup or CSS.
@@ -49,8 +50,12 @@ deno task e2e     # build, then headless-Chromium receive test: sound-only via f
   (`QrTransport`, a `PacketSource` and `PacketDisplay`), `camera.ts`,
   `screen.ts` (draws a code on a canvas), `codecWorker.ts`, `microphone.ts`,
   `speaker.ts`.
-- `src/codecWorker.ts` — worker hosting ggwave, so the page bundle carries no
-  WASM. Page code imports `PACKET_SECONDS` from `protocol.ts`, not `ggwave.ts`.
+- `src/codecWorker.ts` — worker hosting ggwave and libquiet, so the page bundle
+  carries neither. Page code imports `PACKET_SECONDS` from `protocol.ts`, not
+  `ggwave.ts`.
+- `vendor/quiet/` — libquiet's 2016 emscripten asm.js build from quiet-js,
+  wrapped as an ESM factory, plus its memory initializer inlined as `mem.ts`.
+  Excluded from fmt and lint. No wasm; it runs as plain JS.
 - `src/captureWorklet.ts` — AudioWorklet forwarding mic samples in 1024-sample
   blocks.
 
@@ -86,8 +91,12 @@ gitignored).
 - `qr/` — `qrEncoder.ts` (packets into one byte-mode code, `QrEcc`),
   `qrDecoder.ts` (RGBA frame to packets), `bytesAsText.ts`, `rasterize.ts`
   (`QR_COLORS`, test images).
-- `sound/` — ggwave wrapper (`ggwave.ts`), `SoundEncoder`, `SoundDecoder`, and
-  the codec worker's message types.
+- `sound/` — ggwave wrapper (`ggwave.ts`), libquiet wrapper (`quiet.ts`: three
+  profiles with `frame_length` set to one packet, so a frame is a packet or
+  nothing; output is scaled so `volume` maps to peak amplitude like ggwave),
+  `SoundEncoder` (picks the modem by protocol name), `SoundDecoder` (feeds every
+  block to ggwave and all three quiet decoders, so a receiver needs no protocol
+  choice), and the codec worker's message types.
 
 Wire facts (multi-byte fields big-endian):
 

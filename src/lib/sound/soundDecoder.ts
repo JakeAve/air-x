@@ -1,10 +1,11 @@
-import { SOUND_SAMPLES_PER_BLOCK } from "@/lib/protocol.ts";
+import { SOUND_SAMPLE_RATE, SOUND_SAMPLES_PER_BLOCK } from "@/lib/protocol.ts";
 import {
   type GgwaveInstance,
   type GgwaveModule,
   loadGgwave,
   packetParameters,
 } from "./ggwave.ts";
+import { loadQuiet, QUIET_PROTOCOLS, QuietDecoder } from "./quiet.ts";
 
 /**
  * ggwave reports a completed packet again one transmit slot later while it is
@@ -27,9 +28,15 @@ export class SoundDecoder {
   #blockCount = 0;
   #lastPacket: Uint8Array | null = null;
   #lastPacketBlock = 0;
+  #quiet: QuietDecoder[];
 
-  private constructor(g: GgwaveModule, sampleRate?: number) {
+  private constructor(
+    g: GgwaveModule,
+    quiet: QuietDecoder[],
+    sampleRate?: number,
+  ) {
     this.#g = g;
+    this.#quiet = quiet;
     this.#instance = g.init(packetParameters(g, sampleRate));
     const ids = g.ProtocolId;
     for (
@@ -47,7 +54,12 @@ export class SoundDecoder {
   static async create(
     options: { sampleRate?: number } = {},
   ): Promise<SoundDecoder> {
-    return new SoundDecoder(await loadGgwave(), options.sampleRate);
+    const [g, quiet] = await Promise.all([loadGgwave(), loadQuiet()]);
+    const rate = options.sampleRate ?? SOUND_SAMPLE_RATE;
+    const decoders = QUIET_PROTOCOLS.map((p) =>
+      new QuietDecoder(quiet, p, rate)
+    );
+    return new SoundDecoder(g, decoders, options.sampleRate);
   }
 
   push(samples: Float32Array): Uint8Array[] {
@@ -69,6 +81,9 @@ export class SoundDecoder {
           packets.push(packet);
           this.#lastPacket = packet;
           this.#lastPacketBlock = this.#blockCount;
+        }
+        for (const decoder of this.#quiet) {
+          packets.push(...decoder.push(this.#block));
         }
       }
     }
@@ -93,5 +108,6 @@ export class SoundDecoder {
 
   dispose(): void {
     this.#g.free(this.#instance);
+    for (const decoder of this.#quiet) decoder.dispose();
   }
 }

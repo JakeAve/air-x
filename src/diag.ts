@@ -104,9 +104,7 @@ let windowEdited = false;
 let turnaroundEdited = false;
 function defaults() {
   if (!turnaroundEdited) {
-    turnaroundMsInput.value = protocol().startsWith("ultrasound")
-      ? "1000"
-      : "50";
+    turnaroundMsInput.value = protocol().includes("ultrasound") ? "1000" : "50";
   }
   if (!windowEdited) {
     windowMsInput.value = String(

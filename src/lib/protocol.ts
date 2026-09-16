@@ -36,4 +36,7 @@ export const PACKET_SECONDS: Record<SoundProtocol, number> = {
   "ultrasound-fastest": 1.92,
   "ultrasound-fast": 3.84,
   "ultrasound-normal": 5.76,
+  "quiet-audible": 0.58,
+  "quiet-audible-7k": 0.146,
+  "quiet-ultrasound-3600": 0.27,
 };

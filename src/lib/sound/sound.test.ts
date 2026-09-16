@@ -64,6 +64,9 @@ const PROTOCOLS: SoundProtocol[] = [
   "ultrasound-fastest",
   "ultrasound-fast",
   "ultrasound-normal",
+  "quiet-audible",
+  "quiet-audible-7k",
+  "quiet-ultrasound-3600",
 ];
 
 Deno.test("packet round trip through encode, sound, and decodePacket via 128-sample pushes", async () => {

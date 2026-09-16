@@ -1,12 +1,13 @@
 // Builds fake-device fixtures from the real codec: a WAV for Chromium's fake
-// microphone (a single-item text bundle sent as fountain packets 0..k+3 on
-// the fastest sound protocol) and a y4m for its fake camera (a single-item
+// microphone (a single-item text bundle sent as fountain packets 0..k+3, one
+// WAV per sound protocol under test) and a y4m for its fake camera (a single-item
 // binary bundle sent as QR codes of 8 packets each, symbols 0..k+15).
 // Chromium loops both files, so one pass through each is enough.
 import { encodeBundle } from "@/lib/bundle.ts";
 import { Encoder } from "@/lib/fountain/encoder.ts";
 import { encodePacket } from "@/lib/packet.ts";
 import { SOUND_SAMPLE_RATE } from "@/lib/protocol.ts";
+import type { SoundProtocol } from "@/lib/sound/ggwave.ts";
 import { SoundEncoder } from "@/lib/sound/soundEncoder.ts";
 import { encodeQrPackets } from "@/lib/qr/qrEncoder.ts";
 import { rasterize } from "@/lib/qr/rasterize.ts";
@@ -38,7 +39,7 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-async function microphoneWav(): Promise<Uint8Array> {
+async function microphoneWav(protocol: SoundProtocol): Promise<Uint8Array> {
   const bundle = await encodeBundle([{
     name: "message.txt",
     type: "text/plain",
@@ -46,6 +47,7 @@ async function microphoneWav(): Promise<Uint8Array> {
   }]);
   const fountain = new Encoder(bundle, TRANSFER_ID);
   const soundEncoder = await SoundEncoder.create({
+    protocol,
     sampleRate: SOUND_SAMPLE_RATE,
   });
 
@@ -147,12 +149,14 @@ async function cameraY4m(): Promise<Uint8Array> {
 
 export async function writeFixtures(
   dir: string,
-): Promise<{ wav: string; y4m: string }> {
+): Promise<{ wav: string; quietWav: string; y4m: string }> {
   const wav = `${dir}/mic.wav`;
+  const quietWav = `${dir}/mic-quiet.wav`;
   const y4m = `${dir}/cam.y4m`;
-  await Deno.writeFile(wav, await microphoneWav());
+  await Deno.writeFile(wav, await microphoneWav("fastest"));
+  await Deno.writeFile(quietWav, await microphoneWav("quiet-audible-7k"));
   await Deno.writeFile(y4m, await cameraY4m());
-  return { wav, y4m };
+  return { wav, quietWav, y4m };
 }
 
 if (import.meta.main) {

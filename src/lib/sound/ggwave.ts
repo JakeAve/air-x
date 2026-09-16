@@ -6,6 +6,7 @@ import type {
   GgwaveParameters,
   GgwaveProtocolId,
 } from "../../../types/ggwave.d.ts";
+import type { QuietProtocol } from "./quiet.ts";
 import {
   PACKET_BYTES,
   SOUND_SAMPLE_RATE,
@@ -16,13 +17,15 @@ export { PACKET_SECONDS } from "@/lib/protocol.ts";
 
 export type { GgwaveInstance, GgwaveModule, GgwaveProtocolId };
 
-export type SoundProtocol =
+export type GgwaveProtocol =
   | "fastest"
   | "fast"
   | "normal"
   | "ultrasound-fastest"
   | "ultrasound-fast"
   | "ultrasound-normal";
+
+export type SoundProtocol = GgwaveProtocol | QuietProtocol;
 
 let modulePromise: Promise<GgwaveModule> | undefined;
 
@@ -57,7 +60,7 @@ export function packetParameters(
 
 export function protocolId(
   g: GgwaveModule,
-  protocol: SoundProtocol,
+  protocol: GgwaveProtocol,
 ): GgwaveProtocolId {
   switch (protocol) {
     case "fastest":

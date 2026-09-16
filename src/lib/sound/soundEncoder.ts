@@ -1,4 +1,5 @@
-import { PACKET_BYTES } from "@/lib/protocol.ts";
+import { PACKET_BYTES, SOUND_SAMPLE_RATE } from "@/lib/protocol.ts";
+import type { QuietModule } from "../../../types/quiet.d.ts";
 import {
   type GgwaveInstance,
   type GgwaveModule,
@@ -7,6 +8,12 @@ import {
   protocolId,
   type SoundProtocol,
 } from "./ggwave.ts";
+import {
+  isQuietProtocol,
+  loadQuiet,
+  QuietEncoder,
+  type QuietProtocol,
+} from "./quiet.ts";
 
 export interface SoundEncoderOptions {
   protocol?: SoundProtocol;
@@ -22,10 +29,19 @@ export class SoundEncoder {
   #instance: GgwaveInstance;
   #protocol: SoundProtocol;
   #volume: number;
+  #sampleRate: number;
+  #quiet: QuietModule;
+  #quietEncoders = new Map<QuietProtocol, QuietEncoder>();
 
-  private constructor(g: GgwaveModule, options: SoundEncoderOptions) {
+  private constructor(
+    g: GgwaveModule,
+    quiet: QuietModule,
+    options: SoundEncoderOptions,
+  ) {
     this.#g = g;
-    this.#instance = g.init(packetParameters(g, options.sampleRate));
+    this.#quiet = quiet;
+    this.#sampleRate = options.sampleRate ?? SOUND_SAMPLE_RATE;
+    this.#instance = g.init(packetParameters(g, this.#sampleRate));
     this.#protocol = options.protocol ?? "fastest";
     this.#volume = options.volume ?? 50;
   }
@@ -33,7 +49,8 @@ export class SoundEncoder {
   static async create(
     options: SoundEncoderOptions = {},
   ): Promise<SoundEncoder> {
-    return new SoundEncoder(await loadGgwave(), options);
+    const [g, quiet] = await Promise.all([loadGgwave(), loadQuiet()]);
+    return new SoundEncoder(g, quiet, options);
   }
 
   get protocol(): SoundProtocol {
@@ -50,6 +67,19 @@ export class SoundEncoder {
         `packet must be ${PACKET_BYTES} bytes, got ${packet.length}`,
       );
     }
+    if (isQuietProtocol(this.#protocol)) {
+      let encoder = this.#quietEncoders.get(this.#protocol);
+      if (!encoder) {
+        encoder = new QuietEncoder(
+          this.#quiet,
+          this.#protocol,
+          this.#sampleRate,
+        );
+        this.#quietEncoders.set(this.#protocol, encoder);
+      }
+      // ggwave at volume 50 peaks near 0.5, so volume maps to peak the same way.
+      return encoder.encode(packet, this.#volume / 100);
+    }
     const raw = this.#g.encode(
       this.#instance,
       packet,
@@ -65,5 +95,6 @@ export class SoundEncoder {
 
   dispose(): void {
     this.#g.free(this.#instance);
+    for (const encoder of this.#quietEncoders.values()) encoder.dispose();
   }
 }

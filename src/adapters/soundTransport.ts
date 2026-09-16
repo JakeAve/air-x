@@ -47,7 +47,7 @@ export class SoundTransport implements PacketChannel {
     const clips = await Promise.all(
       packets.map((p) => this.#worker.encodeSound(p, this.protocol)),
     );
-    const ultrasound = this.protocol.startsWith("ultrasound");
+    const ultrasound = this.protocol.includes("ultrasound");
     try {
       if (ultrasound) await this.#quietMicrophone(signal);
       for (const [i, clip] of clips.entries()) {

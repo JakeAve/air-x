@@ -1,7 +1,7 @@
-// Drives the diag page in headless Chromium twice: once with a fake
-// microphone fed from fixtures.ts (sound-only receive), once with a fake
-// camera (QR-only receive), so both paths to a rendered item run without
-// hardware. Expects `deno task build` to have run.
+// Drives the diag page in headless Chromium three times: with a fake
+// microphone fed from fixtures.ts (sound-only receive, ggwave then quiet), and
+// with a fake camera (QR-only receive), so every path to a rendered item runs
+// without hardware. Expects `deno task build` to have run.
 // Set CHROMIUM_PATH to use a Chromium outside Playwright's own cache.
 import { serveDir } from "@std/http";
 import { join } from "@std/path";
@@ -77,6 +77,12 @@ try {
   await receive(
     "sound",
     [`--use-file-for-fake-audio-capture=${fixtures.wav}`],
+    ["microphone"],
+    FIXTURE_TEXT,
+  );
+  await receive(
+    "sound quiet",
+    [`--use-file-for-fake-audio-capture=${fixtures.quietWav}`],
     ["microphone"],
     FIXTURE_TEXT,
   );

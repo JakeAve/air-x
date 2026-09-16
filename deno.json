@@ -34,7 +34,10 @@
       "tags": [
         "recommended"
       ]
-    }
+    },
+    "exclude": [
+      "vendor/"
+    ]
   },
   "exclude": [
     "dist/",
@@ -42,5 +45,10 @@
     ".claude/worktrees/",
     ".worktrees/"
   ],
-  "nodeModulesDir": "auto"
+  "nodeModulesDir": "auto",
+  "fmt": {
+    "exclude": [
+      "vendor/"
+    ]
+  }
 }

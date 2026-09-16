@@ -7,6 +7,19 @@
       "runtimeArgs": ["-c", "PORT=8444 deno task dev"],
       "port": 8444,
       "url": "https://localhost:8444"
+    },
+    {
+      "name": "dist-http",
+      "runtimeExecutable": "deno",
+      "runtimeArgs": [
+        "run",
+        "-A",
+        "jsr:@std/http/file-server",
+        "dist",
+        "-p",
+        "8445"
+      ],
+      "port": 8445
     }
   ]
 }

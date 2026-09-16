@@ -33,11 +33,16 @@ deno task e2e     # build, then headless-Chromium receive test: sound-only via f
   transfers for Chromium's fake microphone and fake camera; `receive.ts` serves
   `dist/`, runs a sound-only receive and a QR-only receive headless, and checks
   the diag page renders each item.
-- `static/` — `diag.html` and `styles.css`. Every asset path is relative.
-- `src/diag.ts` — diag page: send text and files by QR, sound, or both; receive
-  from camera and mic at once; log. Defaults: QR on, 8 packets per code, 5 fps,
-  ECC medium; sound on only when the bundle is at most 2048 bytes (until toggled
-  by hand); camera on, scan max edge 1280; silence 12 s.
+- `static/` — `diag.html`, `styles.css`, and `fonts/open-sans.woff2` (variable
+  weight, OFL). Every asset path is relative. Visual rules live in
+  `.claude/skills/air-x-style/SKILL.md`; read it before touching markup or CSS.
+- `src/diag.ts` — the page: three screens picked by the hash (`#home`, `#send`,
+  `#receive`; leaving a screen aborts its transfer). Send text and files by QR,
+  sound, or both (the Send by radio defaults to both for bundles up to 2048
+  bytes, else QR, until picked by hand) with a live time estimate; receive from
+  camera and mic at once; log. One button per screen flips between Send/Listen
+  and Stop. Tuning inputs sit under Advanced. Defaults: 8 packets per code, 5
+  fps, ECC medium; camera on, scan max edge 1280; silence 12 s.
 - `src/adapters/` — the only browser-API code besides the entries: `pageLink.ts`
   (`openDevices`: one codec worker shared by both transports),
   `soundTransport.ts` (`SoundTransport`, a `PacketChannel`), `qrTransport.ts`

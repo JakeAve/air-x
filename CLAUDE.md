@@ -34,9 +34,14 @@ deno task e2e     # build, then headless-Chromium receive test: sound-only via f
   transfers for Chromium's fake microphone and fake camera; `receive.ts` serves
   `dist/`, runs a ggwave sound-only receive, a quiet sound-only receive, and a
   QR-only receive headless, and checks the diag page renders each item.
-- `static/` — `diag.html`, `styles.css`, and `fonts/open-sans.woff2` (variable
-  weight, OFL). Every asset path is relative. Visual rules live in
-  `.claude/skills/air-x-style/SKILL.md`; read it before touching markup or CSS.
+- `static/` — `diag.html`, `styles.css`, `fonts/open-sans.woff2` (variable
+  weight, OFL), and the brand assets: `favicon.svg` (mango square, black
+  exchange arrows), `apple-touch-icon.png`, and `og.png` (1200x630 social card).
+  The two PNGs are rendered from the SVG and the site font by
+  `deno run -A scripts/og.ts`; re-run it after a brand change. Every asset path
+  is relative except the absolute `og:image` and canonical URLs, which point at
+  the Pages site. Visual rules live in `.claude/skills/air-x-style/SKILL.md`;
+  read it before touching markup or CSS.
 - `src/diag.ts` — the page: three screens picked by the hash (`#home`, `#send`,
   `#receive`; leaving a screen aborts its transfer). Send text and files by QR,
   sound, or both (the Send by radio defaults to both for bundles up to 2048

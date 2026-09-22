@@ -26,7 +26,6 @@ jobs:
         with:
           deno-version: v2.x
       - run: deno task build
-      - run: cp dist/diag.html dist/index.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

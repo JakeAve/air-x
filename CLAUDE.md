@@ -28,20 +28,22 @@ deno task e2e     # build, then headless-Chromium receive test: sound-only via f
 
 ## Layout
 
-- `scripts/build.ts` — copies `static/` to `dist/` and bundles `src/diag.ts`,
-  `src/codecWorker.ts`, `src/captureWorklet.ts`. `scripts/dev.ts` serves it.
+- `scripts/build.ts` — copies `static/` to `dist/`, bundles `src/diag.ts`,
+  `src/codecWorker.ts`, `src/captureWorklet.ts`, copies `diag.html` to
+  `index.html`, and stamps `sw.js` with a content hash of `dist/` so every build
+  is a new cache. `scripts/dev.ts` serves it.
 - `scripts/e2e/` — `fixtures.ts` builds a WAV and a y4m of real fountain-coded
   transfers for Chromium's fake microphone and fake camera; `receive.ts` serves
   `dist/`, runs a ggwave sound-only receive, a quiet sound-only receive, and a
   QR-only receive headless, and checks the diag page renders each item.
 - `static/` — `diag.html`, `styles.css`, `fonts/open-sans.woff2` (variable
   weight, OFL), and the brand assets: `favicon.svg` (mango square, black
-  exchange arrows), `apple-touch-icon.png`, and `og.png` (1200x630 social card).
-  The two PNGs are rendered from the SVG and the site font by
-  `deno run -A scripts/og.ts`; re-run it after a brand change. Every asset path
-  is relative except the absolute `og:image` and canonical URLs, which point at
-  the Pages site. Visual rules live in `.claude/skills/air-x-style/SKILL.md`;
-  read it before touching markup or CSS.
+  exchange arrows), `apple-touch-icon.png`, `icon-192.png`, `icon-512.png`, and
+  `og.png` (1200x630 social card). The PNGs are rendered from the SVG and the
+  site font by `deno run -A scripts/og.ts`; re-run it after a brand change.
+  Every asset path is relative except the absolute `og:image` and canonical
+  URLs, which point at the Pages site. Visual rules live in
+  `.claude/skills/air-x-style/SKILL.md`; read it before touching markup or CSS.
 - `src/diag.ts` — the page: three screens picked by the hash (`#home`, `#send`,
   `#receive`; leaving a screen aborts its transfer). Send text and files by QR,
   sound, or both (the Send by radio defaults to both for bundles up to 2048
@@ -134,8 +136,12 @@ Wire facts (multi-byte fields big-endian):
   the sender's mic takes hundreds of ms to reopen and would miss it.
 - The camera, like the mic, is opened by `watch()` and left rolling for a leg;
   the diag page closes it when a receive ends.
-- Airgap's service-worker cache gotcha does not apply: there is no service
-  worker.
+- It is a PWA: `static/manifest.webmanifest` plus `static/sw.js`, a plain-JS
+  service worker that precaches every asset (cache-first, network fallback) so
+  the app opens offline. `src/diag.ts` registers it. Airgap's cache gotcha
+  applies: a change only reaches a device on its second open after the deploy,
+  and the build's hash stamp is what makes it reach at all. Never edit
+  `dist/sw.js` by hand.
 
 ## Workflow
 

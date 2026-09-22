@@ -1,5 +1,5 @@
-// Renders static/og.png (1200x630 social card) and static/apple-touch-icon.png
-// from the site's own font and tokens. Run by hand after a brand change:
+// Renders static/og.png (1200x630 social card), static/apple-touch-icon.png,
+// and the manifest icons from the site's own font and tokens. Run by hand after a brand change:
 //   deno run -A scripts/og.ts
 import { chromium } from "playwright";
 import { toFileUrl } from "@std/path";
@@ -30,9 +30,17 @@ await page.setContent(card);
 await page.waitForFunction(() => document.fonts.ready.then(() => true));
 await page.screenshot({ path: STATIC + "og.png" });
 
-await page.setViewportSize({ width: 180, height: 180 });
-await page.setContent(
-  `<!DOCTYPE html><style>*{margin:0}svg{width:180px;height:180px;display:block}</style>${mark}`,
-);
-await page.screenshot({ path: STATIC + "apple-touch-icon.png" });
+for (
+  const [size, file] of [
+    [180, "apple-touch-icon.png"],
+    [192, "icon-192.png"],
+    [512, "icon-512.png"],
+  ] as const
+) {
+  await page.setViewportSize({ width: size, height: size });
+  await page.setContent(
+    `<!DOCTYPE html><style>*{margin:0}svg{width:${size}px;height:${size}px;display:block}</style>${mark}`,
+  );
+  await page.screenshot({ path: STATIC + file });
+}
 await browser.close();

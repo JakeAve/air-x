@@ -518,3 +518,6 @@ listenButton.addEventListener("click", async () => {
     listenButton.classList.add("primary");
   }
 });
+
+// Installs the app for offline use; the page works without it.
+navigator.serviceWorker?.register("./sw.js");

@@ -87,14 +87,16 @@ gitignored).
   `send(packets, signal)`), `PacketDisplay` (`show`, `clear`).
 - `receiver.ts` — `Receiver`: one decoder per interleaved transfer, evicts stale
   ones.
-- `session.ts` — `sendBundle` (sound bursts of `listenEvery` then a listen
-  window, and QR codes of `packetsPerCode` at `fps`, from one encoder until DONE
-  is heard) and `receiveBundle` (sound plus any `sources`; sends DONE by sound).
-  Silence rules count sound only: once complete, DONE goes out at once if no
-  sound from the transfer was heard within `silenceMs`, else after `silenceMs`
-  of sound silence or on a `DataListen`. After DONE, packets of that transfer
-  (QR included) mean the sender missed it, so silence re-sends DONE; silence
-  with nothing heard since DONE finishes.
+- `session.ts` — `sendBundle` (sound or QR, never both: sound bursts of
+  `listenEvery` then a listen window, or QR codes of `packetsPerCode` at `fps`,
+  until DONE is heard; Ack packets heard on `listen` queue their blocks, and
+  each burst or code sends queued blocks before fresh symbols) and
+  `receiveBundle` (sound plus any `sources`; sends DONE by sound). Silence rules
+  count sound only: once complete, DONE goes out at once if no sound from the
+  transfer was heard within `silenceMs`, else after `silenceMs` of sound silence
+  or on a `DataListen`. After DONE, packets of that transfer (QR included) mean
+  the sender missed it, so silence re-sends DONE; silence with nothing heard
+  since DONE finishes.
 - `qr/` — `qrEncoder.ts` (packets into one byte-mode code, `QrEcc`),
   `qrDecoder.ts` (RGBA frame to packets), `bytesAsText.ts`, `rasterize.ts`
   (`QR_COLORS`, test images).

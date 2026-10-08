@@ -3,12 +3,13 @@ import { sleep } from "./abort.ts";
 import { encodeBundle, type Item } from "./bundle.ts";
 import type { PacketChannel, PacketDisplay, PacketSource } from "./channel.ts";
 import { Encoder } from "./fountain/encoder.ts";
-import { decodePacket, encodePacket, PacketType } from "./packet.ts";
+import { decodePacket, encodeAck, encodePacket, PacketType } from "./packet.ts";
 import {
   receiveBundle,
   type Received,
   type ReceiveProgress,
   sendBundle,
+  type SendProgress,
 } from "./session.ts";
 
 const AIRTIME_MS = 3;
@@ -362,34 +363,51 @@ Deno.test("a QR-only transfer completes over lost codes and DONE goes out at onc
   assertEquals((await received)?.items, items);
 });
 
-Deno.test("sound and QR together use fewer sound packets than sound alone", async () => {
-  const items = testItems(2_000);
-  const bundle = await encodeBundle(items);
+Deno.test("sendBundle takes sound or qr, not both", async () => {
+  const air = new Air({ seed: 0 });
+  const channel = air.party();
+  await assertRejects(
+    () =>
+      sendBundle(new Uint8Array(1), {
+        ...sound(channel, LISTEN_EVERY, WINDOW_MS),
+        qr: { display: new Display({ seed: 0 }), packetsPerCode: 1, fps: 1 },
+        signal: new AbortController().signal,
+      }),
+    RangeError,
+  );
+});
 
-  const soundPackets = async (withQr: boolean) => {
-    const air = new Air({ seed: 9, loss: 0.2 });
-    const display = new Display({ seed: 9, loss: 0.3 });
-    let soundSent = 0;
-    const received = receiveBundle({
-      sound: air.party(),
-      sources: [display],
-      silenceMs: SILENCE_MS,
-      signal: new AbortController().signal,
-    });
-    const sent = await sendBundle(bundle, {
-      ...sound(air.party(), LISTEN_EVERY, WINDOW_MS),
-      qr: withQr ? { display, packetsPerCode: 2, fps: 50 } : undefined,
-      signal: new AbortController().signal,
-      onProgress: (p) => soundSent = p.soundSent,
-    });
-    assertEquals(sent, "done");
-    assertEquals((await received)?.items, items);
-    return soundSent;
-  };
+Deno.test("an Ack queues its blocks ahead of fresh symbols", async () => {
+  const bundle = await encodeBundle(testItems(2_000));
+  const air = new Air({ seed: 12 });
+  const listen = air.party();
+  const stop = new AbortController();
+  const events: SendProgress[] = [];
+  let acked = false;
 
-  const alone = await soundPackets(false);
-  const together = await soundPackets(true);
-  assert(together < alone, `${together} >= ${alone}`);
+  const sent = sendBundle(bundle, {
+    listen,
+    qr: { display: new Display({ seed: 12 }), packetsPerCode: 4, fps: 100 },
+    signal: stop.signal,
+    onProgress: (p) => {
+      events.push(p);
+      if (acked) return stop.abort();
+      acked = true;
+      (listen as Party).hear(encodePacket({
+        type: PacketType.Ack,
+        transferId: p.transferId,
+        k: p.k,
+        symbolId: 0,
+        data: encodeAck([{ start: 2, length: 3 }]),
+      }));
+    },
+  });
+
+  assertEquals(await sent, "stopped");
+  assert(events[0].k > 5);
+  assertEquals(events[1].symbolIds.slice(0, 3), [2, 3, 4]);
+  assertEquals(events[1].symbolIds[3], 4);
+  assertEquals(events[1].acked, 3);
 });
 
 Deno.test("a source that delivers each code twice counts sourceNew once per symbol", async () => {

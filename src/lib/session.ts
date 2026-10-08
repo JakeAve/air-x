@@ -2,7 +2,13 @@ import { anySignal, sleep } from "./abort.ts";
 import { BundleError, decodeBundle, type Item } from "./bundle.ts";
 import type { PacketChannel, PacketDisplay, PacketSource } from "./channel.ts";
 import { Encoder } from "./fountain/encoder.ts";
-import { decodePacket, encodePacket, PacketType } from "./packet.ts";
+import {
+  decodeAck,
+  decodePacket,
+  encodePacket,
+  type Packet,
+  PacketType,
+} from "./packet.ts";
 import { DATA_BYTES } from "./protocol.ts";
 import { type Completed, Receiver, type TransferProgress } from "./receiver.ts";
 
@@ -15,6 +21,8 @@ export interface SendProgress {
   /** The batch that just went out. */
   via: "sound" | "qr";
   symbolIds: number[];
+  /** Blocks queued for resend from acks so far. */
+  acked: number;
 }
 
 export interface SoundSend {
@@ -30,8 +38,9 @@ export interface QrSend {
 }
 
 export interface SendOptions {
-  /** Where DONE is heard. */
+  /** Where DONE and acks are heard. */
   listen: PacketSource;
+  /** Exactly one of `sound` and `qr`. */
   sound?: SoundSend;
   qr?: QrSend;
   signal: AbortSignal;
@@ -44,14 +53,19 @@ export async function sendBundle(
 ): Promise<"done" | "stopped"> {
   const { listen, sound, qr, signal, onProgress } = options;
   if (!sound && !qr) throw new RangeError("sendBundle needs sound or qr");
+  if (sound && qr) {
+    throw new RangeError("sendBundle takes sound or qr, not both");
+  }
   const transferId = crypto.getRandomValues(new Uint16Array(1))[0];
   const encoder = new Encoder(bundle, transferId);
   const heardDone = new AbortController();
-  const failed = new AbortController();
-  const stop = anySignal(signal, heardDone.signal, failed.signal);
+  const stop = anySignal(signal, heardDone.signal);
   let soundSent = 0;
   let qrSent = 0;
   let codes = 0;
+  let acked = 0;
+  const wanted: number[] = [];
+  const queued = new Set<number>();
   const progress = (via: "sound" | "qr", symbolIds: number[]) =>
     onProgress?.({
       transferId,
@@ -61,60 +75,59 @@ export async function sendBundle(
       codes,
       via,
       symbolIds,
+      acked,
     });
 
-  const loop = async (body: () => Promise<void>, cleanup?: () => void) => {
-    try {
-      while (!stop.aborted) await body();
-    } catch (err) {
-      if (!stop.aborted) {
-        failed.abort();
-        throw err;
-      }
-    } finally {
-      cleanup?.();
-    }
-  };
+  /** Queued blocks first, then fresh symbols; the last packet gets `lastType`. */
+  const batch = (count: number, lastType: PacketType): Packet[] =>
+    Array.from({ length: count }, (_, i) => {
+      const type = i === count - 1 ? lastType : PacketType.Data;
+      const id = wanted.shift();
+      if (id === undefined) return encoder.next(type);
+      queued.delete(id);
+      return encoder.symbol(id, type);
+    });
 
   const unsubscribe = listen.onPacket((bytes) => {
     if (stop.aborted) return;
     const packet = decodePacket(bytes);
-    if (packet?.type === PacketType.Done && packet.transferId === transferId) {
-      heardDone.abort();
+    if (packet?.transferId !== transferId) return;
+    if (packet.type === PacketType.Done) heardDone.abort();
+    if (packet.type !== PacketType.Ack) return;
+    for (const { start, length } of decodeAck(packet.data)) {
+      for (let id = start; id < start + length && id < encoder.k; id++) {
+        if (queued.has(id)) continue;
+        queued.add(id);
+        wanted.push(id);
+        acked++;
+      }
     }
   });
 
   try {
-    await Promise.all([
-      sound && loop(async () => {
+    while (!stop.aborted) {
+      if (sound) {
         const { channel, listenEvery, windowMs } = sound;
-        const symbols = Array.from(
-          { length: listenEvery },
-          (_, i) =>
-            encoder.next(
-              i === listenEvery - 1 ? PacketType.DataListen : PacketType.Data,
-            ),
-        );
+        const symbols = batch(listenEvery, PacketType.DataListen);
         await channel.send(symbols.map(encodePacket), stop);
-        if (stop.aborted) return;
+        if (stop.aborted) break;
         soundSent += symbols.length;
         progress("sound", symbols.map((s) => s.symbolId));
         await sleep(windowMs, stop);
-      }),
-      qr && loop(async () => {
-        const symbols = Array.from(
-          { length: qr.packetsPerCode },
-          () => encoder.next(PacketType.Data),
-        );
+      } else if (qr) {
+        const symbols = batch(qr.packetsPerCode, PacketType.Data);
         qr.display.show(symbols.map(encodePacket));
         qrSent += symbols.length;
         codes++;
         progress("qr", symbols.map((s) => s.symbolId));
         await sleep(1000 / qr.fps, stop);
-      }, () => qr.display.clear()),
-    ]);
+      }
+    }
+  } catch (err) {
+    if (!stop.aborted) throw err;
   } finally {
     unsubscribe();
+    qr?.display.clear();
   }
   return heardDone.signal.aborted ? "done" : "stopped";
 }

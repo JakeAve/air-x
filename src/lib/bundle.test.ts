@@ -1,5 +1,6 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
 import { BundleError, decodeBundle, encodeBundle, Item } from "./bundle.ts";
+import { DATA_BYTES } from "./protocol.ts";
 
 function seededRandom(seed: number) {
   let s = seed;
@@ -166,4 +167,30 @@ Deno.test("garbage bytes fail decompression as BundleError", async () => {
   out.set(compressed, 4);
   out.set(hash, 4 + compressed.length);
   await assertRejects(() => decodeBundle(out), BundleError);
+});
+
+Deno.test("a one-line message fits one packet", async () => {
+  const items: Item[] = [{
+    name: "message.txt",
+    type: "text/plain",
+    bytes: new TextEncoder().encode("Running late, there in 10"),
+  }];
+  const bytes = await encodeBundle(items);
+  assert(bytes.length <= DATA_BYTES, `${bytes.length} bytes`);
+  assertEquals(await decodeBundle(bytes), items);
+});
+
+// Pins the dictionary: sender and receiver must deflate against the same
+// bytes, so a dictionary edit fails here until PROTOCOL_VERSION is bumped.
+Deno.test("the vcard bundle matches its golden bytes", async () => {
+  const bytes = await encodeBundle([
+    { name: "jake.vcf", type: "text/vcard", bytes: VCARD },
+  ]);
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(
+    "",
+  );
+  assertEquals(
+    hex,
+    "00000034636060b0c5624416b07800390d4d3f3814e0fa4d2c800660ab9e810d3650bdec052a631c81a54125520d0b001d028514618df53d",
+  );
 });

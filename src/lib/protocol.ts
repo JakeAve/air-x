@@ -1,6 +1,6 @@
 import type { SoundProtocol } from "./sound/ggwave.ts";
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /** Packet layout: version 4b | type 4b | transferId 16b | k 24b | symbolId 24b | data | crc16. */
 export const PACKET_BYTES = 64;

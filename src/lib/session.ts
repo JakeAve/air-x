@@ -3,6 +3,7 @@ import { BundleError, decodeBundle, type Item } from "./bundle.ts";
 import type { PacketChannel, PacketDisplay, PacketSource } from "./channel.ts";
 import { Encoder } from "./fountain/encoder.ts";
 import {
+  ackHeard,
   decodeAck,
   decodePacket,
   encodeAck,
@@ -12,6 +13,7 @@ import {
   type Run,
 } from "./packet.ts";
 import { ACK_RUNS, DATA_BYTES } from "./protocol.ts";
+import type { QrRate, RatePolicy } from "./rate.ts";
 import { type Completed, Receiver, type TransferProgress } from "./receiver.ts";
 
 export interface SendProgress {
@@ -25,6 +27,8 @@ export interface SendProgress {
   symbolIds: number[];
   /** Blocks queued for resend from acks so far. */
   acked: number;
+  /** The rate of a QR batch. */
+  rate?: QrRate;
 }
 
 export interface SoundSend {
@@ -35,8 +39,17 @@ export interface SoundSend {
 
 export interface QrSend {
   display: PacketDisplay;
+  /** With `adapt`, only where the rate starts. */
   packetsPerCode: number;
   fps: number;
+  /**
+   * Lets `policy` change the rate as the receiver's acks come in. It gets one
+   * sample per ack whose stretch of fresh symbols all went out at the current
+   * rate (the first ack, and one spanning a rate change, only set the
+   * baseline), and one with `heard` undefined each time `silentAfter` fresh
+   * symbols go out with no ack.
+   */
+  adapt?: { policy: RatePolicy; silentAfter: number };
 }
 
 export interface SendOptions {
@@ -68,6 +81,28 @@ export async function sendBundle(
   let acked = 0;
   const wanted: number[] = [];
   const queued = new Set<number>();
+  let rate: QrRate = {
+    packetsPerCode: qr?.packetsPerCode ?? 0,
+    fps: qr?.fps ?? 0,
+  };
+  /** Fresh symbols sent, which is also the next fresh symbol id. */
+  let fresh = 0;
+  /** First fresh id sent at `rate`. */
+  let rateSince = 0;
+  /** Fresh count when the receiver was last heard from, or last given up on. */
+  let quietSince = 0;
+  // ponytail: one baseline, so two receivers acking in turn give samples that
+  // mix their counts; keep one per receiver if acks ever say who sent them.
+  let reported: { highest: number; heard: number } | undefined;
+  const retune = (sent: number, heard: number | undefined) => {
+    const next = qr!.adapt!.policy({ rate, sent, heard });
+    quietSince = fresh;
+    if (next.packetsPerCode === rate.packetsPerCode && next.fps === rate.fps) {
+      return;
+    }
+    rate = next;
+    rateSince = fresh;
+  };
   const progress = (via: "sound" | "qr", symbolIds: number[]) =>
     onProgress?.({
       transferId,
@@ -78,6 +113,7 @@ export async function sendBundle(
       via,
       symbolIds,
       acked,
+      rate: via === "qr" ? rate : undefined,
     });
 
   /** Queued blocks first, then fresh symbols; the last packet gets `lastType`. */
@@ -85,7 +121,10 @@ export async function sendBundle(
     Array.from({ length: count }, (_, i) => {
       const type = i === count - 1 ? lastType : PacketType.Data;
       const id = wanted.shift();
-      if (id === undefined) return encoder.next(type);
+      if (id === undefined) {
+        fresh++;
+        return encoder.next(type);
+      }
       queued.delete(id);
       return encoder.symbol(id, type);
     });
@@ -96,6 +135,16 @@ export async function sendBundle(
     if (packet?.transferId !== transferId) return;
     if (packet.type === PacketType.Done) heardDone.abort();
     if (packet.type !== PacketType.Ack) return;
+    const last = reported;
+    if (qr?.adapt && (!last || packet.symbolId > last.highest)) {
+      reported = { highest: packet.symbolId, heard: ackHeard(packet.data) };
+      quietSince = fresh;
+      if (last && last.highest + 1 >= rateSince) {
+        const sent = reported.highest - last.highest;
+        const heard = reported.heard - last.heard;
+        retune(sent, Math.max(0, Math.min(sent, heard)));
+      }
+    }
     for (const { start, length } of decodeAck(packet.data)) {
       for (let id = start; id < start + length && id < encoder.k; id++) {
         if (queued.has(id)) continue;
@@ -117,12 +166,15 @@ export async function sendBundle(
         progress("sound", symbols.map((s) => s.symbolId));
         await sleep(windowMs, stop);
       } else if (qr) {
-        const symbols = batch(qr.packetsPerCode, PacketType.Data);
+        const symbols = batch(rate.packetsPerCode, PacketType.Data);
         qr.display.show(symbols.map(encodePacket));
         qrSent += symbols.length;
         codes++;
         progress("qr", symbols.map((s) => s.symbolId));
-        await sleep(1000 / qr.fps, stop);
+        if (qr.adapt && fresh - quietSince >= qr.adapt.silentAfter) {
+          retune(fresh - quietSince, undefined);
+        }
+        await sleep(1000 / rate.fps, stop);
       }
     }
   } catch (err) {
@@ -158,11 +210,12 @@ export interface ReceiveOptions {
   /** Wait before each DONE or ack, so it lands after the sender's microphone is rolling again. */
   turnaroundMs?: number;
   /**
-   * Once a transfer's first repair symbol is heard (its first pass is over),
-   * ack the missing blocks every this many new symbols heard, resends
-   * included, while any are missing; undefined never acks. The same rhythm at
-   * every size: a bundle of up to DENSE_MAX_K blocks repairs in fewer symbols
-   * than the default period, so it never acks.
+   * Ack every this many new symbols heard, resends included; undefined never
+   * acks. Counting starts at a transfer's first symbol from a source, or at
+   * its first repair symbol when it comes by sound. Every ack reports the
+   * fresh symbols heard, for a sender adapting its rate; it names missing
+   * blocks only once a repair symbol was heard (the first pass is over). A
+   * bundle that finishes inside the period never acks.
    */
   ackEvery?: number;
   signal: AbortSignal;
@@ -204,8 +257,12 @@ export function receiveBundle(
     let timer: ReturnType<typeof setTimeout> | undefined;
     let completions = Promise.resolve();
     const lastSound = new Map<number, number>();
-    /** Per transfer, once a repair symbol was heard: new symbols since then or since the last ack. */
+    /** Per transfer, once counting began: new symbols since then or since the last ack. */
     const heardSince = new Map<number, number>();
+    /** Per transfer: the highest symbol id heard, and how many arrived above the highest before them. Fresh symbols go out in id order and resends are always lower, so `heard` counts fresh ones. */
+    const fresh = new Map<number, { highest: number; heard: number }>();
+    /** Transfers with a repair symbol heard: their missing blocks were all sent once. */
+    const repairing = new Set<number>();
     /** Transfer whose ack waits for the next DataListen. */
     let ackPending: number | undefined;
     /** Completion's DONE-or-silence step, held while an ack is in flight. */
@@ -274,15 +331,18 @@ export function receiveBundle(
         const transfer = receiver.progress().find((t) =>
           t.transferId === transferId
         );
-        const runs = transfer?.missing(ACK_RUNS) ?? [];
-        if (!transfer || runs.length === 0) return;
+        if (!transfer) return;
+        const runs = repairing.has(transferId)
+          ? transfer.missing(ACK_RUNS)
+          : [];
+        const { highest, heard } = fresh.get(transferId)!;
         await sound.send([
           encodePacket({
             type: PacketType.Ack,
             transferId,
             k: transfer.k,
-            symbolId: transfer.resolved,
-            data: encodeAck(runs),
+            symbolId: highest,
+            data: encodeAck(runs, heard),
           }),
         ], signal);
         if (finished) return;
@@ -333,6 +393,13 @@ export function receiveBundle(
         isNew = !seenSymbols.has(key);
         seenSymbols.add(key);
         if (!fromSound && isNew) sourceNew++;
+        const seen = fresh.get(packet.transferId) ?? { highest: -1, heard: 0 };
+        if (packet.symbolId > seen.highest) {
+          seen.highest = packet.symbolId;
+          seen.heard++;
+        }
+        fresh.set(packet.transferId, seen);
+        if (packet.symbolId >= packet.k) repairing.add(packet.transferId);
       }
       const soundListen = fromSound && packet.type === PacketType.DataListen;
       if (fromSound && !received && packet.type !== PacketType.Done) {
@@ -355,7 +422,7 @@ export function receiveBundle(
       ) {
         const { transferId } = packet;
         const counting = heardSince.has(transferId) ||
-          packet.symbolId >= packet.k;
+          packet.symbolId >= packet.k || !fromSound;
         if (isNew && counting) {
           const heard = (heardSince.get(transferId) ?? 0) + 1;
           heardSince.set(transferId, heard);

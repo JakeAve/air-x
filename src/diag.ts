@@ -5,6 +5,7 @@ import { encodeBundle, type Item } from "@/lib/bundle.ts";
 import { blockCount } from "@/lib/fountain/symbols.ts";
 import { receiveBundle, sendBundle } from "@/lib/session.ts";
 import { PACKET_SECONDS } from "@/lib/protocol.ts";
+import { ladderPolicy, SILENT_AFTER } from "@/lib/rate.ts";
 import type { QrEcc } from "@/lib/qr/qrEncoder.ts";
 import type { SoundProtocol } from "@/lib/sound/ggwave.ts";
 
@@ -27,6 +28,7 @@ const sendEstimate = $<HTMLParagraphElement>("send-estimate");
 const packetsPerCodeInput = $<HTMLInputElement>("packets-per-code");
 const fpsInput = $<HTMLInputElement>("fps");
 const eccSelect = $<HTMLSelectElement>("ecc");
+const adaptRateToggle = $<HTMLInputElement>("adapt-rate");
 const protocolSelect = $<HTMLSelectElement>("protocol");
 const listenEveryInput = $<HTMLInputElement>("listen-every");
 const windowMsInput = $<HTMLInputElement>("window-ms");
@@ -351,24 +353,40 @@ sendButton.addEventListener("click", async () => {
     log(
       `send: ${items.length} item(s), ${bundle.length} bytes` +
         (by === "qr"
-          ? `, qr ${packetsPerCode}/code @ ${fps} fps ${qr.ecc}`
+          ? `, qr ${packetsPerCode}/code @ ${fps} fps ${qr.ecc}${
+            adaptRateToggle.checked ? ", adaptive" : ""
+          }`
           : `, sound ${sound.protocol} listenEvery ${listenEvery} window ${windowMs} ms`),
     );
     let announced = false;
     // Past the first n packets the grid empties and refills once per pass.
     let pass = 0;
     let ackedSoFar = 0;
+    let rateNow = packetsPerCode * fps;
     result = await sendBundle(bundle, {
       listen: sound,
       sound: by === "sound"
         ? { channel: sound, listenEvery, windowMs }
         : undefined,
-      qr: by === "qr" ? { display: qr, packetsPerCode, fps } : undefined,
+      qr: by === "qr"
+        ? {
+          display: qr,
+          packetsPerCode,
+          fps,
+          adapt: adaptRateToggle.checked
+            ? { policy: ladderPolicy(), silentAfter: SILENT_AFTER }
+            : undefined,
+        }
+        : undefined,
       signal: controller.signal,
       onProgress: (
-        { transferId, k, soundSent, qrSent, via, symbolIds, acked },
+        { transferId, k, soundSent, qrSent, via, symbolIds, acked, rate },
       ) => {
         const sent = soundSent + qrSent;
+        if (rate && rate.packetsPerCode * rate.fps !== rateNow) {
+          rateNow = rate.packetsPerCode * rate.fps;
+          log(`send: rate now ${rate.packetsPerCode}/code @ ${rate.fps} fps`);
+        }
         if (acked > ackedSoFar) {
           log(`send: ack heard: ${acked - ackedSoFar} blocks`);
           ackedSoFar = acked;

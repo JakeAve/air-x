@@ -52,8 +52,8 @@ deno task e2e     # build, then headless-Chromium receive test: sound-only via f
   else QR, until picked by hand) with a live time estimate of both; receive from
   camera and mic at once; log, including acks on both ends. One button per
   screen flips between Send/Listen and Stop. Tuning inputs sit under Advanced.
-  Defaults: 8 packets per code, 5 fps, ECC medium; camera on, scan max edge
-  1280, ack every 160 symbols (0 never acks); silence 12 s.
+  Defaults: 8 packets per code, 5 fps, ECC medium, adapt rate on; camera on,
+  scan max edge 1280, ack every 160 symbols (0 never acks); silence 12 s.
 - `src/adapters/` — the only browser-API code besides the entries: `pageLink.ts`
   (`openDevices`: one codec worker shared by both transports),
   `soundTransport.ts` (`SoundTransport`, a `PacketChannel`), `qrTransport.ts`
@@ -106,14 +106,23 @@ gitignored).
   transfer was heard within `silenceMs`, else after `silenceMs` of sound silence
   or on a `DataListen`. After DONE, packets of that transfer (QR included) mean
   the sender missed it, so silence re-sends DONE; silence with nothing heard
-  since DONE finishes. With `ackEvery` set, once a transfer's first repair
-  symbol is heard the receiver sends an `Ack` by sound naming its missing runs
-  every `ackEvery` new symbols (resends included) while any are missing, with
-  DONE's timing and `turnaroundMs`. Each ack is a snapshot, so a lost resend is
-  simply named again, and the sender ignores blocks already queued. The period
-  is the same at every size; dense repair (k <= 128) finishes in about missing +
-  2 symbols, inside the default 160, so small bundles never ack. Acks heard from
-  other receivers count as neither symbols nor sound from the transfer.
+  since DONE finishes. With `ackEvery` set, the receiver sends an `Ack` by sound
+  every `ackEvery` new symbols (resends included), with DONE's timing and
+  `turnaroundMs`; counting starts at a transfer's first symbol from a source, or
+  its first repair symbol when it comes by sound. Every ack reports the highest
+  symbol id and the count of fresh symbols heard; it names missing runs only
+  once a repair symbol was heard. Each ack is a snapshot, so a lost resend is
+  simply named again, and the sender ignores blocks already queued. A bundle
+  that finishes inside the period never acks. Acks heard from other receivers
+  count as neither symbols nor sound from the transfer. With `qr.adapt`, the
+  sender turns each pair of acks into a `RateSample` (fresh symbols sent and
+  heard at one rate) and uses the rate its `RatePolicy` returns; the first ack,
+  and one whose stretch spans a rate change, only set the baseline, and
+  `silentAfter` fresh symbols with no ack give a sample with `heard` undefined.
+- `rate.ts` — the decision engine, apart from the plumbing: `RatePolicy` is a
+  function from a `RateSample` to the next `QrRate`. `ladderPolicy` is the one
+  in use; its ladder and thresholds are `LADDER_DEFAULTS`, guesses to be tuned
+  on phones. The receiver needs no rate: a code says how many packets it holds.
 - `qr/` — `qrEncoder.ts` (packets into one byte-mode code, `QrEcc`),
   `qrDecoder.ts` (RGBA frame to packets), `bytesAsText.ts`, `rasterize.ts`
   (`QR_COLORS`, test images).
@@ -128,7 +137,9 @@ Wire facts (multi-byte fields big-endian):
 
 - Packet, 64 bytes:
   `version 4b | type 4b | transferId 16b | k 24b | symbolId 24b | data 53B | crc16`.
-  Types: `Data`, `DataListen`, `Done`.
+  Types: `Data`, `DataListen`, `Done`, `Ack` (`symbolId` is the highest id
+  heard; data is 12 runs of `start u24 | length u8`, then fresh symbols heard as
+  a u24).
 - Bundle:
   `u32 length | deflate-raw(u32 manifestLength | manifest JSON | item bytes...) | sha256[0..8]`.
   `length` counts compressed bytes plus hash, so block padding past it is

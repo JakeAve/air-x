@@ -16,7 +16,7 @@ export enum PacketType {
   Data = 0,
   DataListen = 1,
   Done = 2,
-  /** Receiver to sender: data holds runs of missing blocks, symbolId the resolved count. */
+  /** Receiver to sender: data holds runs of missing blocks and the fresh symbols heard, symbolId the highest id heard. */
   Ack = 3,
 }
 
@@ -100,12 +100,18 @@ export interface Run {
   length: number;
 }
 
-/** Packs runs as `start u24 | length u8` each; zero padding ends the list. */
-export function encodeAck(runs: Run[]): Uint8Array {
+const ACK_HEARD_OFFSET = ACK_RUNS * ACK_RUN_BYTES;
+
+/** Packs runs as `start u24 | length u8` each, zero padding ending the list, then `heard` as a u24. */
+export function encodeAck(runs: Run[], heard = 0): Uint8Array {
   if (runs.length > ACK_RUNS) {
     throw new RangeError(`${runs.length} runs, at most ${ACK_RUNS}`);
   }
+  assertRange(heard, MAX_SYMBOL_ID, "heard");
   const data = new Uint8Array(DATA_BYTES);
+  data[ACK_HEARD_OFFSET] = (heard >> 16) & 0xff;
+  data[ACK_HEARD_OFFSET + 1] = (heard >> 8) & 0xff;
+  data[ACK_HEARD_OFFSET + 2] = heard & 0xff;
   runs.forEach(({ start, length }, i) => {
     assertRange(start, MAX_K, "start");
     if (length < 1) throw new RangeError(`length ${length} out of range`);
@@ -117,6 +123,12 @@ export function encodeAck(runs: Run[]): Uint8Array {
     data[o + 3] = length;
   });
   return data;
+}
+
+/** The fresh-symbol count an ack carries after its runs. */
+export function ackHeard(data: Uint8Array): number {
+  return (data[ACK_HEARD_OFFSET] << 16) | (data[ACK_HEARD_OFFSET + 1] << 8) |
+    data[ACK_HEARD_OFFSET + 2];
 }
 
 export function decodeAck(data: Uint8Array): Run[] {

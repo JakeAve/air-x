@@ -1,5 +1,6 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import {
+  ackHeard,
   decodeAck,
   decodePacket,
   encodeAck,
@@ -151,12 +152,13 @@ Deno.test("encodePacket throws RangeError when data length is wrong", () => {
 
 Deno.test("an ack pins its exact bytes and round trips through a packet", () => {
   const runs = [{ start: 0x010203, length: 4 }, { start: 7, length: 255 }];
-  const data = encodeAck(runs);
+  const data = encodeAck(runs, 0x0a0b0c);
   assertEquals(data.length, DATA_BYTES);
   assertEquals(
     [...data.subarray(0, 9)],
     [1, 2, 3, 4, 0, 0, 7, 255, 0],
   );
+  assertEquals([...data.subarray(48)], [0x0a, 0x0b, 0x0c, 0, 0]);
   const packet: Packet = {
     type: PacketType.Ack,
     transferId: 9,
@@ -167,13 +169,15 @@ Deno.test("an ack pins its exact bytes and round trips through a packet", () => 
   const back = decodePacket(encodePacket(packet))!;
   assertEquals(back, packet);
   assertEquals(decodeAck(back.data), runs);
+  assertEquals(ackHeard(back.data), 0x0a0b0c);
 });
 
 Deno.test("decodeAck of all zeros is empty, and encodeAck rejects bad runs", () => {
   assertEquals(decodeAck(new Uint8Array(DATA_BYTES)), []);
   assertEquals(decodeAck(encodeAck([])), []);
-  const full = Array.from({ length: 13 }, (_, i) => ({ start: i, length: 1 }));
-  assertEquals(decodeAck(encodeAck(full)), full);
+  const full = Array.from({ length: 12 }, (_, i) => ({ start: i, length: 1 }));
+  assertEquals(decodeAck(encodeAck(full, 0xffffff)), full);
+  assertEquals(ackHeard(encodeAck(full, 0xffffff)), 0xffffff);
   assertThrows(() => encodeAck([...full, { start: 0, length: 1 }]), RangeError);
   assertThrows(() => encodeAck([{ start: 0, length: 0 }]), RangeError);
   assertThrows(() => encodeAck([{ start: 0, length: 256 }]), RangeError);

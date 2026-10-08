@@ -1,6 +1,6 @@
 import type { SoundProtocol } from "./sound/ggwave.ts";
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /** Packet layout: version 4b | type 4b | transferId 16b | k 24b | symbolId 24b | data | crc16. */
 export const PACKET_BYTES = 64;
@@ -11,8 +11,8 @@ export const DATA_BYTES = PACKET_BYTES - PACKET_HEADER_BYTES - PACKET_CRC_BYTES;
 /** Up to this many blocks, repair symbols are dense random rows instead of LT. */
 export const DENSE_MAX_K = 128;
 
-/** Ack data: up to ACK_RUNS runs of `start u24 | length u8`, zero padded. */
-export const ACK_RUNS = 13;
+/** Ack data: up to ACK_RUNS runs of `start u24 | length u8`, zero padded, then a u24 count of fresh symbols heard. */
+export const ACK_RUNS = 12;
 export const ACK_RUN_BYTES = 4;
 export const ACK_MAX_RUN = 255;
 

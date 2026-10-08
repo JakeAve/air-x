@@ -5,12 +5,15 @@ import type { PacketChannel, PacketDisplay, PacketSource } from "./channel.ts";
 import { Encoder } from "./fountain/encoder.ts";
 import { DENSE_MAX_K } from "./protocol.ts";
 import {
+  ackHeard,
+  decodeAck,
   decodePacket,
   encodeAck,
   encodePacket,
   PacketType,
   type Run,
 } from "./packet.ts";
+import type { QrRate, RateSample } from "./rate.ts";
 import {
   receiveBundle,
   type Received,
@@ -516,14 +519,15 @@ Deno.test("a QR receiver acks the blocks of dropped codes and the sender resends
   assert(last);
   assertEquals(last!.k, 41);
   assert(acks.length >= 1);
-  // A repair symbol may peel a dropped block by luck before the ack, so the
-  // first ack names some of code 3's blocks, and nothing outside the drops.
+  // Acks before the first repair symbol name no blocks. A repair symbol may
+  // peel a dropped block by luck before the ack, so the first ack with runs
+  // names some of code 3's blocks, and nothing outside the drops.
   const blocks = (code: number) =>
     Array.from({ length: packetsPerCode }, (_, i) => code * packetsPerCode + i);
   const dropped = new Set([...blocks(3), ...blocks(7)]);
-  const ackedBlocks = acks[0].flatMap(({ start, length }) =>
-    Array.from({ length }, (_, i) => start + i)
-  );
+  const ackedBlocks = acks.find((runs) => runs.length)!.flatMap((
+    { start, length },
+  ) => Array.from({ length }, (_, i) => start + i));
   assert(ackedBlocks.every((b) => dropped.has(b)));
   assert(blocks(3).some((b) => ackedBlocks.includes(b)));
   assert(last!.qrSent < last!.k + 2 * packetsPerCode + 8);
@@ -667,4 +671,123 @@ Deno.test("without ackEvery a receiver never acks", async () => {
   assertEquals(sent, "done");
   assertEquals((await received)?.items, items);
   assertEquals(last!.acked, 0);
+});
+
+Deno.test("a QR receiver's acks report the highest id and fresh symbols heard, naming no blocks before a repair symbol", async () => {
+  const bundle = await encodeBundle(testItems(2_000));
+  const air = new Air({ seed: 16 });
+  const display = new Display({ seed: 16, dropCodes: [1] });
+  const stop = new AbortController();
+  const acks: { highest: number; heard: number; runs: Run[] }[] = [];
+  const listen = air.party();
+  listen.onPacket((bytes) => {
+    const packet = decodePacket(bytes)!;
+    if (packet.type !== PacketType.Ack) return;
+    acks.push({
+      highest: packet.symbolId,
+      heard: ackHeard(packet.data),
+      runs: decodeAck(packet.data),
+    });
+    if (acks.length === 2) stop.abort();
+  });
+
+  const received = receiveBundle({
+    sound: air.party(),
+    sources: [display],
+    silenceMs: 60_000,
+    ackEvery: 4,
+    signal: stop.signal,
+  });
+  await sendBundle(bundle, {
+    listen,
+    qr: { display, packetsPerCode: 4, fps: 20 },
+    signal: stop.signal,
+  });
+  await received;
+
+  assertEquals(acks, [
+    { highest: 3, heard: 4, runs: [] },
+    { highest: 11, heard: 8, runs: [] },
+  ]);
+});
+
+/** Runs a QR send, answering the i-th code with `acks[i]` as [highest, heard], and stops after `codes` codes. */
+async function adaptiveSend(
+  codes: number,
+  acks: Record<number, [number, number]>,
+  silentAfter: number,
+  policy: (sample: RateSample) => QrRate,
+) {
+  const bundle = await encodeBundle(testItems(4_000));
+  const listen = new Air({ seed: 17 }).party();
+  const stop = new AbortController();
+  const samples: RateSample[] = [];
+  const sizes: number[] = [];
+
+  await sendBundle(bundle, {
+    listen,
+    qr: {
+      display: new Display({ seed: 17 }),
+      packetsPerCode: 4,
+      fps: 100,
+      adapt: {
+        silentAfter,
+        policy: (sample) => {
+          samples.push(sample);
+          return policy(sample);
+        },
+      },
+    },
+    signal: stop.signal,
+    onProgress: (p) => {
+      assertEquals(p.rate?.packetsPerCode, p.symbolIds.length);
+      const ack = acks[sizes.length];
+      sizes.push(p.symbolIds.length);
+      if (sizes.length === codes) return stop.abort();
+      if (!ack) return;
+      (listen as Party).hear(encodePacket({
+        type: PacketType.Ack,
+        transferId: p.transferId,
+        k: p.k,
+        symbolId: ack[0],
+        data: encodeAck([], ack[1]),
+      }));
+    },
+  });
+  return { samples, sizes };
+}
+
+Deno.test("an adaptive QR sender samples each stretch between acks and takes the policy's rate, up and down", async () => {
+  const at = (packetsPerCode: number) => ({ packetsPerCode, fps: 100 });
+  const { samples, sizes } = await adaptiveSend(
+    5,
+    // Baseline, all 4 heard, 1 of 8 heard, then a stale ack that is ignored.
+    { 0: [3, 4], 1: [7, 8], 2: [15, 9], 3: [11, 99] },
+    1_000,
+    ({ sent, heard }) => at(heard === sent ? 8 : 2),
+  );
+
+  assertEquals(samples, [
+    { rate: at(4), sent: 4, heard: 4 },
+    { rate: at(8), sent: 8, heard: 1 },
+  ]);
+  assertEquals(sizes, [4, 4, 8, 2, 2]);
+});
+
+Deno.test("an adaptive QR sender reports silence, and an ack spanning the rate change only sets the baseline", async () => {
+  const at = (packetsPerCode: number) => ({ packetsPerCode, fps: 100 });
+  const { samples, sizes } = await adaptiveSend(
+    6,
+    // Baseline; silence after 8 more symbols drops the rate at id 12; the ack
+    // at 13 covers ids 4..13 at two rates, the one at 15 covers 14..15.
+    { 0: [3, 4], 3: [13, 6], 4: [15, 8] },
+    8,
+    () => at(2),
+  );
+
+  assertEquals(samples, [
+    { rate: at(4), sent: 8, heard: undefined },
+    { rate: at(2), sent: 2, heard: 2 },
+  ]);
+  assertEquals(sizes, [4, 4, 4, 2, 2, 2]);
 });

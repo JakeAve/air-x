@@ -9,12 +9,14 @@ games. Deno 2 + TypeScript, plain HTML and CSS.
 
 - **Runtime / tooling:** Deno 2.x only. No Node, no npm scripts, no framework.
 - **Language:** TypeScript. `src/lib/` uses no DOM and no `Deno.*`, only globals
-  present in both browsers and Deno (`CompressionStream`, `crypto.subtle`,
-  `TextEncoder`).
+  present in both browsers and Deno (`crypto.subtle`, `TextEncoder`) plus
+  `fflate`.
 - **Tests:** `deno test`, colocated `*.test.ts`, seeded PRNGs so every run is
   identical.
 - **Imports:** `@std/assert`, `@std/fs`, `@std/path`, `@std/http`, `ggwave`,
-  `qr` (encode from `qr`, decode from `qr/decode.js`), and `@/` for `./src/`.
+  `qr` (encode from `qr`, decode from `qr/decode.js`), `fflate` (deflate with a
+  preset dictionary, which `CompressionStream` cannot do), and `@/` for
+  `./src/`.
 
 ## Commands
 
@@ -76,7 +78,14 @@ gitignored).
   `PACKET_SECONDS` per sound protocol.
 - `crc16.ts` — CRC-16/CCITT-FALSE over the packet.
 - `packet.ts` — 64-byte packet codec; rejects bad CRC, version, or type.
-- `bundle.ts` — items to one byte string: deflate-raw plus truncated SHA-256.
+- `bundle.ts` — items to one byte string: deflate-raw against `DICTIONARY` plus
+  truncated SHA-256. Inflates in 4 KB steps of input so the 64 MiB cap trips
+  before a bomb allocates.
+- `dictionary.ts` — the preset deflate dictionary, hand-written: vCard,
+  iCalendar, and Wi-Fi boilerplate, URL prefixes, common English and Spanish
+  words, MIME types, and the manifest JSON itself. It is why a one-line message
+  fits one packet. Changing a byte changes every bundle on the wire: bump
+  `PROTOCOL_VERSION` and refresh the golden in `bundle.test.ts`.
 - `fountain/symbols.ts` — `blockCount`, and `blockSet`: which blocks a symbol id
   XORs (systematic below K; above it, dense random rows for `k <= DENSE_MAX_K`,
   robust soliton LT otherwise).
@@ -123,7 +132,10 @@ Wire facts (multi-byte fields big-endian):
 - Bundle:
   `u32 length | deflate-raw(u32 manifestLength | manifest JSON | item bytes...) | sha256[0..8]`.
   `length` counts compressed bytes plus hash, so block padding past it is
-  ignored.
+  ignored. Deflate uses the preset dictionary in `dictionary.ts` on both ends;
+  the manifest JSON is in it, so a short text message costs about 25 bytes on
+  the wire instead of 87. Incompressible items come out as stored blocks (5
+  bytes per 64 KiB), so there is no per-item codec choice.
 - Repair symbols for `k <= DENSE_MAX_K` (128) are dense: each block is included
   with probability 1/2, one mulberry32 draw per block in order, falling back to
   one block if empty. Larger k uses robust soliton degrees.

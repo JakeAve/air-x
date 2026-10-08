@@ -1,6 +1,10 @@
 // Bundle wire format: u32 length | deflate-raw(u32 manifestLength | manifest
 // JSON | item bytes...) | sha256[0..8]. `length` counts the compressed bytes
 // plus the hash, so a fountain decoder's zero padding past it is ignored.
+// Deflate uses the preset DICTIONARY, which is what lets a bundle under a
+// kilobyte compress at all; the manifest JSON itself is in the dictionary.
+import { deflateSync, Inflate } from "fflate";
+import { DICTIONARY } from "./dictionary.ts";
 import { MAX_INFLATED_BYTES } from "./protocol.ts";
 
 export interface Item {
@@ -35,31 +39,26 @@ function asArrayBuffer(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
   return bytes as Uint8Array<ArrayBuffer>;
 }
 
-async function deflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
-  const stream = new Blob([asArrayBuffer(bytes)]).stream().pipeThrough(
-    new CompressionStream("deflate-raw"),
-  );
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+function deflateRaw(bytes: Uint8Array): Uint8Array {
+  return deflateSync(bytes, { level: 9, dictionary: DICTIONARY });
 }
 
-async function inflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
-  const stream = new Blob([asArrayBuffer(bytes)]).stream().pipeThrough(
-    new DecompressionStream("deflate-raw"),
-  );
-  const reader = stream.getReader();
+/** Compressed bytes fed to the inflater per step, so a bomb is caught before it allocates. */
+const INFLATE_STEP = 4096;
+
+function inflateRaw(bytes: Uint8Array): Uint8Array {
   const chunks: Uint8Array[] = [];
   let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.length;
+  const inflate = new Inflate({ dictionary: DICTIONARY }, (chunk) => {
+    total += chunk.length;
     if (total > MAX_INFLATED_BYTES) {
-      await reader.cancel();
-      throw new BundleError(
-        `bundle inflates past ${MAX_INFLATED_BYTES} bytes`,
-      );
+      throw new BundleError(`bundle inflates past ${MAX_INFLATED_BYTES} bytes`);
     }
-    chunks.push(value);
+    chunks.push(chunk);
+  });
+  for (let i = 0; i < bytes.length || i === 0; i += INFLATE_STEP) {
+    const end = Math.min(i + INFLATE_STEP, bytes.length);
+    inflate.push(bytes.subarray(i, end), end === bytes.length);
   }
   const out = new Uint8Array(total);
   let offset = 0;
@@ -103,7 +102,7 @@ export async function encodeBundle(items: Item[]): Promise<Uint8Array> {
     offset += item.bytes.length;
   }
 
-  const compressed = await deflateRaw(inner);
+  const compressed = deflateRaw(inner);
   const hash = await sha256Prefix(compressed);
 
   const out = new Uint8Array(LENGTH_BYTES + compressed.length + hash.length);
@@ -138,8 +137,9 @@ export async function decodeBundle(bytes: Uint8Array): Promise<Item[]> {
 
   let inner: Uint8Array;
   try {
-    inner = await inflateRaw(compressed);
+    inner = inflateRaw(compressed);
   } catch (cause) {
+    if (cause instanceof BundleError) throw cause;
     throw new BundleError("failed to decompress bundle", { cause });
   }
 

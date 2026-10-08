@@ -7,7 +7,13 @@ import {
   Packet,
   PacketType,
 } from "./packet.ts";
-import { DATA_BYTES, MAX_K, MAX_SYMBOL_ID, PACKET_BYTES } from "./protocol.ts";
+import {
+  DATA_BYTES,
+  MAX_K,
+  MAX_SYMBOL_ID,
+  PACKET_BYTES,
+  PROTOCOL_VERSION,
+} from "./protocol.ts";
 
 function seededRandom(seed: number) {
   let s = seed;
@@ -84,7 +90,7 @@ Deno.test("a wrong version decodes to undefined", () => {
     data: randomData(random),
   };
   const bytes = encodePacket(packet);
-  bytes[0] = (2 << 4) | packet.type;
+  bytes[0] = (((PROTOCOL_VERSION + 1) & 0xf) << 4) | packet.type;
   assertEquals(decodePacket(bytes), undefined);
 });
 

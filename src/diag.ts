@@ -40,7 +40,7 @@ const flipButton = $<HTMLButtonElement>("flip");
 const preview = $<HTMLVideoElement>("preview");
 const scanMaxEdgeInput = $<HTMLInputElement>("scan-max-edge");
 const turnaroundMsInput = $<HTMLInputElement>("turnaround-ms");
-const ackAfterMsInput = $<HTMLInputElement>("ack-after-ms");
+const ackAfterRepairInput = $<HTMLInputElement>("ack-after-repair");
 const listenButton = $<HTMLButtonElement>("listen");
 const receivedItems = $<HTMLUListElement>("received-items");
 const logEl = $<HTMLPreElement>("log");
@@ -514,12 +514,12 @@ listenButton.addEventListener("click", async () => {
     const start = performance.now();
     stopTicker = ticker("rx-time", start);
     const turnaround = turnaroundMs();
-    const ackAfter = Math.max(0, Number(ackAfterMsInput.value) || 0);
+    const ackAfter = Math.max(0, Number(ackAfterRepairInput.value) || 0);
     log(
       `receive: listening, camera ${
         scanningQr ? "on" : "off"
-      }, turnaround ${turnaround} ms, ack after ${ackAfter || "never"}${
-        ackAfter ? " ms" : ""
+      }, turnaround ${turnaround} ms, ack after ${
+        ackAfter ? `${ackAfter}x missing` : "never"
       }`,
     );
     let counts = "sound 0, qr 0, rejected 0";
@@ -529,7 +529,7 @@ listenButton.addEventListener("click", async () => {
       sources: scanningQr ? [qr] : undefined,
       silenceMs: SILENCE_MS,
       turnaroundMs: turnaround,
-      ackAfterMs: ackAfter || undefined,
+      ackAfterRepair: ackAfter || undefined,
       onAck: (transferId, runs) => {
         const blocks = runs.reduce((sum, r) => sum + r.length, 0);
         log(

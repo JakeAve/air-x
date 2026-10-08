@@ -51,7 +51,7 @@ deno task e2e     # build, then headless-Chromium receive test: sound-only via f
   camera and mic at once; log, including acks on both ends. One button per
   screen flips between Send/Listen and Stop. Tuning inputs sit under Advanced.
   Defaults: 8 packets per code, 5 fps, ECC medium; camera on, scan max edge
-  1280, ack after 1500 ms (0 never acks); silence 12 s.
+  1280, ack after repair 2x missing (0 never acks); silence 12 s.
 - `src/adapters/` — the only browser-API code besides the entries: `pageLink.ts`
   (`openDevices`: one codec worker shared by both transports),
   `soundTransport.ts` (`SoundTransport`, a `PacketChannel`), `qrTransport.ts`
@@ -97,12 +97,14 @@ gitignored).
   transfer was heard within `silenceMs`, else after `silenceMs` of sound silence
   or on a `DataListen`. After DONE, packets of that transfer (QR included) mean
   the sender missed it, so silence re-sends DONE; silence with nothing heard
-  since DONE finishes. With `ackAfterMs` set, a receiver that has heard a symbol
-  id at or past k (the first pass is over) and then resolves no block for
-  `ackAfterMs` sends an `Ack` by sound naming its missing runs, with DONE's
-  timing and `turnaroundMs`; the timer re-arms on each resolved block or ack,
-  and only the last heard incomplete transfer is acked. Acks heard from other
-  receivers count as neither symbols nor sound from the transfer.
+  since DONE finishes. With `ackAfterRepair` set, once the new repair symbols
+  heard for a transfer (since its first pass ended or its last ack) reach that
+  ratio times the blocks still missing, the receiver sends an `Ack` by sound
+  naming its missing runs, with DONE's timing and `turnaroundMs`. Dense repair
+  (k <= 128) completes in about missing + 2 symbols, so the default ratio of 2
+  only fires for LT-sized bundles, where repair costs several times the missing
+  count. Acks heard from other receivers count as neither symbols nor sound from
+  the transfer.
 - `qr/` — `qrEncoder.ts` (packets into one byte-mode code, `QrEcc`),
   `qrDecoder.ts` (RGBA frame to packets), `bytesAsText.ts`, `rasterize.ts`
   (`QR_COLORS`, test images).

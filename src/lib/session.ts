@@ -157,8 +157,14 @@ export interface ReceiveOptions {
   silenceMs: number;
   /** Wait before each DONE or ack, so it lands after the sender's microphone is rolling again. */
   turnaroundMs?: number;
-  /** Ack the missing blocks once the sender's first pass is over and none has resolved for this long; undefined never acks. */
-  ackAfterMs?: number;
+  /**
+   * Ack the missing blocks once the new repair symbols heard since the first
+   * pass ended, or since the last ack, reach this many times the missing block
+   * count; undefined never acks. Dense repair (k <= DENSE_MAX_K) completes in
+   * about missing + 2 symbols, so a ratio of 2 never fires there, only where LT
+   * repair costs several times the missing count.
+   */
+  ackAfterRepair?: number;
   signal: AbortSignal;
   onProgress?: (p: ReceiveProgress) => void;
   onComplete?: (r: Received) => void;
@@ -174,7 +180,7 @@ export function receiveBundle(
     sources = [],
     silenceMs,
     turnaroundMs = 0,
-    ackAfterMs,
+    ackAfterRepair,
     signal,
     onProgress,
     onComplete,
@@ -196,19 +202,14 @@ export function receiveBundle(
     let sending = false;
     let finished = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let ackTimer: ReturnType<typeof setTimeout> | undefined;
     let completions = Promise.resolve();
     const lastSound = new Map<number, number>();
-    /** Transfers with a symbol id at or past k heard: the sender's first pass is over. */
-    const pastK = new Set<number>();
-    let lastIncomplete: number | undefined;
-    /** Stalled transfer whose ack waits for the next DataListen. */
+    /** New repair symbols (id at or past k) heard per transfer since the first pass ended or the last ack. */
+    const repairHeard = new Map<number, number>();
+    /** Transfer whose ack waits for the next DataListen. */
     let ackPending: number | undefined;
     /** Completion's DONE-or-silence step, held while an ack is in flight. */
     let afterAck: (() => void) | undefined;
-    const resolvedOf = (transferId: number) =>
-      receiver.progress().find((t) => t.transferId === transferId)?.resolved ??
-        0;
 
     const armSilence = () => {
       if (finished || sending) return;
@@ -250,22 +251,15 @@ export function receiveBundle(
       armSilence();
     };
 
-    const armAck = () => {
-      if (ackAfterMs === undefined || finished || received) return;
-      ackPending = undefined;
-      clearTimeout(ackTimer);
-      ackTimer = setTimeout(() => {
-        const transferId = lastIncomplete;
-        if (received || transferId === undefined || !pastK.has(transferId)) {
-          return;
-        }
-        const soundAt = lastSound.get(transferId);
-        if (soundAt === undefined || Date.now() - soundAt >= silenceMs) {
-          sendAck(transferId);
-        } else {
-          ackPending = transferId;
-        }
-      }, ackAfterMs);
+    /** Ack now if the sender is not chirping, else at its next DataListen. */
+    const tryAck = (transferId: number) => {
+      if (finished || received) return;
+      const soundAt = lastSound.get(transferId);
+      if (soundAt === undefined || Date.now() - soundAt >= silenceMs) {
+        sendAck(transferId);
+      } else {
+        ackPending = transferId;
+      }
     };
 
     const sendAck = async (transferId: number) => {
@@ -293,6 +287,7 @@ export function receiveBundle(
         ], signal);
         if (finished) return;
         acked++;
+        repairHeard.set(transferId, 0);
         onAck?.(transferId, runs);
       } catch (err) {
         if (!signal.aborted) finish(err);
@@ -303,7 +298,6 @@ export function receiveBundle(
           const next = afterAck;
           afterAck = undefined;
           if (next) next();
-          else if (!received) armAck();
         }
       }
     };
@@ -333,9 +327,10 @@ export function receiveBundle(
     };
 
     const hearSymbol = (packet: Packet, fromSound: boolean) => {
+      let isNew = false;
       if (packet.type !== PacketType.Done) {
         const key = packet.transferId * 2 ** 24 + packet.symbolId;
-        const isNew = !seenSymbols.has(key);
+        isNew = !seenSymbols.has(key);
         seenSymbols.add(key);
         if (!fromSound && isNew) sourceNew++;
       }
@@ -343,7 +338,6 @@ export function receiveBundle(
       if (fromSound && !received && packet.type !== PacketType.Done) {
         lastSound.set(packet.transferId, Date.now());
       }
-      const before = resolvedOf(packet.transferId);
       const completed = receiver.push(packet, Date.now());
       if (completed) {
         completions = completions
@@ -357,17 +351,22 @@ export function receiveBundle(
         if (soundListen) sendDone();
         else if (fromSound) armSilence();
       } else if (
-        ackAfterMs !== undefined && !received &&
+        ackAfterRepair !== undefined && !received &&
         packet.type !== PacketType.Done
       ) {
-        lastIncomplete = packet.transferId;
-        const firstPastK = packet.symbolId >= packet.k &&
-          !pastK.has(packet.transferId);
-        if (firstPastK) pastK.add(packet.transferId);
-        if (firstPastK || resolvedOf(packet.transferId) > before) armAck();
-        else if (soundListen && ackPending === packet.transferId) {
-          sendAck(packet.transferId);
+        const { transferId } = packet;
+        if (isNew && packet.symbolId >= packet.k) {
+          const heard = (repairHeard.get(transferId) ?? 0) + 1;
+          repairHeard.set(transferId, heard);
+          const transfer = receiver.progress().find((t) =>
+            t.transferId === transferId
+          );
+          if (
+            transfer &&
+            heard >= ackAfterRepair * (transfer.k - transfer.resolved)
+          ) tryAck(transferId);
         }
+        if (soundListen && ackPending === transferId) sendAck(transferId);
       }
     };
 
@@ -404,7 +403,6 @@ export function receiveBundle(
       if (finished) return;
       finished = true;
       clearTimeout(timer);
-      clearTimeout(ackTimer);
       for (const unsubscribe of unsubscribes) unsubscribe();
       signal.removeEventListener("abort", onAbort);
       if (err === undefined) resolve(received);

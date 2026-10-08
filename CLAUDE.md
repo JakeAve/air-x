@@ -45,12 +45,13 @@ deno task e2e     # build, then headless-Chromium receive test: sound-only via f
   URLs, which point at the Pages site. Visual rules live in
   `.claude/skills/air-x-style/SKILL.md`; read it before touching markup or CSS.
 - `src/diag.ts` — the page: three screens picked by the hash (`#home`, `#send`,
-  `#receive`; leaving a screen aborts its transfer). Send text and files by QR,
-  sound, or both (the Send by radio defaults to both for bundles up to 2048
-  bytes, else QR, until picked by hand) with a live time estimate; receive from
-  camera and mic at once; log. One button per screen flips between Send/Listen
-  and Stop. Tuning inputs sit under Advanced. Defaults: 8 packets per code, 5
-  fps, ECC medium; camera on, scan max edge 1280; silence 12 s.
+  `#receive`; leaving a screen aborts its transfer). Send text and files by QR
+  or sound (the Send by radio defaults to sound for bundles up to 2048 bytes,
+  else QR, until picked by hand) with a live time estimate of both; receive from
+  camera and mic at once; log, including acks on both ends. One button per
+  screen flips between Send/Listen and Stop. Tuning inputs sit under Advanced.
+  Defaults: 8 packets per code, 5 fps, ECC medium; camera on, scan max edge
+  1280, ack after 1500 ms (0 never acks); silence 12 s.
 - `src/adapters/` — the only browser-API code besides the entries: `pageLink.ts`
   (`openDevices`: one codec worker shared by both transports),
   `soundTransport.ts` (`SoundTransport`, a `PacketChannel`), `qrTransport.ts`

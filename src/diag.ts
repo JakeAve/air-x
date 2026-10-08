@@ -40,6 +40,7 @@ const flipButton = $<HTMLButtonElement>("flip");
 const preview = $<HTMLVideoElement>("preview");
 const scanMaxEdgeInput = $<HTMLInputElement>("scan-max-edge");
 const turnaroundMsInput = $<HTMLInputElement>("turnaround-ms");
+const ackAfterMsInput = $<HTMLInputElement>("ack-after-ms");
 const listenButton = $<HTMLButtonElement>("listen");
 const receivedItems = $<HTMLUListElement>("received-items");
 const logEl = $<HTMLPreElement>("log");
@@ -163,7 +164,7 @@ const turnaroundMs = () => Math.max(0, Number(turnaroundMsInput.value) || 0);
 
 const sendBy = () =>
   (document.querySelector('input[name="send-by"]:checked') as HTMLInputElement)
-    .value;
+    .value as "qr" | "sound";
 
 let windowEdited = false;
 let turnaroundEdited = false;
@@ -283,7 +284,7 @@ function itemsChanged() {
       return;
     }
     if (!sendByEdited) {
-      const pick = bytes <= SOUND_DEFAULT_MAX_BYTES ? "both" : "qr";
+      const pick = bytes <= SOUND_DEFAULT_MAX_BYTES ? "sound" : "qr";
       (document.querySelector(
         `input[name="send-by"][value="${pick}"]`,
       ) as HTMLInputElement).checked = true;
@@ -315,8 +316,6 @@ sendButton.addEventListener("click", async () => {
       return;
     }
     const by = sendBy();
-    const useQr = by !== "sound";
-    const useSound = by !== "qr";
     try {
       await sound.listen();
     } catch (err) {
@@ -333,13 +332,12 @@ sendButton.addEventListener("click", async () => {
       qrPerSecond,
       soundPerSecond,
     } = rates();
-    const perSecond = (useQr ? qrPerSecond : 0) +
-      (useSound ? soundPerSecond : 0);
+    const perSecond = by === "qr" ? qrPerSecond : soundPerSecond;
     const n = Math.ceil(OVERHEAD * blockCount(bundle.length));
     sendTitle.textContent = "sending";
     sendForm.hidden = true;
     sendRun.hidden = false;
-    qrCanvas.hidden = !useQr;
+    qrCanvas.hidden = by !== "qr";
     gridReset("send-grid", n, $("send-grid").clientWidth, innerHeight / 2);
     show("send-count", `0 of ${n} packets`);
     sendButton.textContent = "Stop";
@@ -352,21 +350,29 @@ sendButton.addEventListener("click", async () => {
     );
     log(
       `send: ${items.length} item(s), ${bundle.length} bytes` +
-        (useQr ? `, qr ${packetsPerCode}/code @ ${fps} fps ${qr.ecc}` : "") +
-        (useSound
-          ? `, sound ${sound.protocol} listenEvery ${listenEvery} window ${windowMs} ms`
-          : ""),
+        (by === "qr"
+          ? `, qr ${packetsPerCode}/code @ ${fps} fps ${qr.ecc}`
+          : `, sound ${sound.protocol} listenEvery ${listenEvery} window ${windowMs} ms`),
     );
     let announced = false;
     // Past the first n packets the grid empties and refills once per pass.
     let pass = 0;
+    let ackedSoFar = 0;
     result = await sendBundle(bundle, {
       listen: sound,
-      sound: useSound ? { channel: sound, listenEvery, windowMs } : undefined,
-      qr: useQr ? { display: qr, packetsPerCode, fps } : undefined,
+      sound: by === "sound"
+        ? { channel: sound, listenEvery, windowMs }
+        : undefined,
+      qr: by === "qr" ? { display: qr, packetsPerCode, fps } : undefined,
       signal: controller.signal,
-      onProgress: ({ transferId, k, soundSent, qrSent, via, symbolIds }) => {
+      onProgress: (
+        { transferId, k, soundSent, qrSent, via, symbolIds, acked },
+      ) => {
         const sent = soundSent + qrSent;
+        if (acked > ackedSoFar) {
+          log(`send: ack heard: ${acked - ackedSoFar} blocks`);
+          ackedSoFar = acked;
+        }
         for (const id of symbolIds) {
           if (Math.floor(id / n) > pass) {
             pass = Math.floor(id / n);
@@ -508,10 +514,13 @@ listenButton.addEventListener("click", async () => {
     const start = performance.now();
     stopTicker = ticker("rx-time", start);
     const turnaround = turnaroundMs();
+    const ackAfter = Math.max(0, Number(ackAfterMsInput.value) || 0);
     log(
       `receive: listening, camera ${
         scanningQr ? "on" : "off"
-      }, turnaround ${turnaround} ms`,
+      }, turnaround ${turnaround} ms, ack after ${ackAfter || "never"}${
+        ackAfter ? " ms" : ""
+      }`,
     );
     let counts = "sound 0, qr 0, rejected 0";
     let shown: number | undefined;
@@ -520,6 +529,13 @@ listenButton.addEventListener("click", async () => {
       sources: scanningQr ? [qr] : undefined,
       silenceMs: SILENCE_MS,
       turnaroundMs: turnaround,
+      ackAfterMs: ackAfter || undefined,
+      onAck: (transferId, runs) => {
+        const blocks = runs.reduce((sum, r) => sum + r.length, 0);
+        log(
+          `receive: transfer ${transferId} ack: ${blocks} blocks in ${runs.length} runs`,
+        );
+      },
       signal: controller.signal,
       onProgress: (
         {

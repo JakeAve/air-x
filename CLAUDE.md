@@ -96,7 +96,12 @@ gitignored).
   transfer was heard within `silenceMs`, else after `silenceMs` of sound silence
   or on a `DataListen`. After DONE, packets of that transfer (QR included) mean
   the sender missed it, so silence re-sends DONE; silence with nothing heard
-  since DONE finishes.
+  since DONE finishes. With `ackAfterMs` set, a receiver that has heard a symbol
+  id at or past k (the first pass is over) and then resolves no block for
+  `ackAfterMs` sends an `Ack` by sound naming its missing runs, with DONE's
+  timing and `turnaroundMs`; the timer re-arms on each resolved block or ack,
+  and only the last heard incomplete transfer is acked. Acks heard from other
+  receivers count as neither symbols nor sound from the transfer.
 - `qr/` — `qrEncoder.ts` (packets into one byte-mode code, `QrEcc`),
   `qrDecoder.ts` (RGBA frame to packets), `bytesAsText.ts`, `rasterize.ts`
   (`QR_COLORS`, test images).

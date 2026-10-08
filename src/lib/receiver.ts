@@ -5,6 +5,8 @@ export interface TransferProgress {
   transferId: number;
   k: number;
   resolved: number;
+  /** Lazy: see `Decoder.states`. */
+  states: () => Uint8Array;
 }
 
 export interface Completed {
@@ -73,6 +75,7 @@ export class Receiver {
       transferId,
       k: entry.decoder.k!,
       resolved: entry.decoder.resolved,
+      states: () => entry.decoder.states(),
     }));
   }
 

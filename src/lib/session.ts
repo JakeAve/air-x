@@ -12,6 +12,9 @@ export interface SendProgress {
   soundSent: number;
   qrSent: number;
   codes: number;
+  /** The batch that just went out. */
+  via: "sound" | "qr";
+  symbolIds: number[];
 }
 
 export interface SoundSend {
@@ -49,8 +52,16 @@ export async function sendBundle(
   let soundSent = 0;
   let qrSent = 0;
   let codes = 0;
-  const progress = () =>
-    onProgress?.({ transferId, k: encoder.k, soundSent, qrSent, codes });
+  const progress = (via: "sound" | "qr", symbolIds: number[]) =>
+    onProgress?.({
+      transferId,
+      k: encoder.k,
+      soundSent,
+      qrSent,
+      codes,
+      via,
+      symbolIds,
+    });
 
   const loop = async (body: () => Promise<void>, cleanup?: () => void) => {
     try {
@@ -77,28 +88,28 @@ export async function sendBundle(
     await Promise.all([
       sound && loop(async () => {
         const { channel, listenEvery, windowMs } = sound;
-        const packets = Array.from(
+        const symbols = Array.from(
           { length: listenEvery },
           (_, i) =>
-            encodePacket(encoder.next(
+            encoder.next(
               i === listenEvery - 1 ? PacketType.DataListen : PacketType.Data,
-            )),
+            ),
         );
-        await channel.send(packets, stop);
+        await channel.send(symbols.map(encodePacket), stop);
         if (stop.aborted) return;
-        soundSent += packets.length;
-        progress();
+        soundSent += symbols.length;
+        progress("sound", symbols.map((s) => s.symbolId));
         await sleep(windowMs, stop);
       }),
       qr && loop(async () => {
-        const packets = Array.from(
+        const symbols = Array.from(
           { length: qr.packetsPerCode },
-          () => encodePacket(encoder.next(PacketType.Data)),
+          () => encoder.next(PacketType.Data),
         );
-        qr.display.show(packets);
-        qrSent += packets.length;
+        qr.display.show(symbols.map(encodePacket));
+        qrSent += symbols.length;
         codes++;
-        progress();
+        progress("qr", symbols.map((s) => s.symbolId));
         await sleep(1000 / qr.fps, stop);
       }, () => qr.display.clear()),
     ]);

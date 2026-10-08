@@ -115,7 +115,7 @@
         </div>
         <div id="send-run" class="stack" hidden>
           <canvas id="qr-canvas" class="qr" hidden></canvas>
-          <div class="bar"><i id="send-bar"></i></div>
+          <div id="send-grid" class="grid"></div>
           <div class="progress">
             <span id="send-count" class="count">–</span>
             <span id="send-time" class="muted">–</span>
@@ -149,14 +149,16 @@
           </details>
         </div>
         <div id="receive-run" class="stack" hidden>
-          <video id="preview" class="preview" muted playsinline hidden></video>
+          <div class="stage">
+            <video id="preview" class="preview" muted playsinline
+              hidden></video>
+            <div id="rx-grid" class="grid"></div>
+          </div>
           <button id="flip" hidden>Flip camera</button>
-          <div class="bar"><i id="rx-bar"></i></div>
           <div class="progress">
             <span id="rx-count" class="count">–</span>
             <span id="rx-time" class="muted">–</span>
           </div>
-          <p id="rx-camera" class="muted" hidden></p>
           <ul id="received-items" class="items"></ul>
         </div>
         <button id="listen" class="primary">Listen</button>

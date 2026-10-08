@@ -37,6 +37,15 @@ export class Decoder {
     return this.#resolved;
   }
 
+  /** Per block: 0 unseen, 1 covered by a pending symbol, 2 resolved. */
+  states(): Uint8Array {
+    const out = new Uint8Array(this.#k ?? 0);
+    for (let b = 0; b < out.length; b++) {
+      out[b] = this.#isResolved[b] ? 2 : this.#pendingByBlock[b].size ? 1 : 0;
+    }
+    return out;
+  }
+
   push(packet: Packet): Uint8Array | undefined {
     if (this.#k !== undefined && this.#resolved === this.#k) {
       return this.#blocks;

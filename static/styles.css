@@ -412,31 +412,46 @@ main[data-screen="home"] .log {
 }
 
 /* Progress: 6px track, count big and light, timing muted on the right. */
-.bar {
-  width: 100%;
-  height: 0.375rem;
-  background: var(--surface-2);
+.grid {
+  --cols: 8;
+  --cell-gap: 0.25rem;
+  display: grid;
+  grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+  gap: var(--cell-gap);
 }
 
-.bar i {
-  display: block;
-  width: 0;
-  height: 100%;
+.grid i {
+  aspect-ratio: 1;
+  background: var(--unlit, var(--surface));
+  transform-origin: left center;
+}
+
+.grid i[data-s="1"] {
+  outline: var(--b2) solid var(--accent);
+  outline-offset: calc(-1 * var(--b2));
+}
+
+.grid i[data-s="2"] {
   background: var(--accent);
-  transition: width 0.25s;
+  animation: land 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.progress {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 1rem;
+.grid i[data-s="3"] {
+  background: var(--ink);
+  animation: land 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.count {
-  font-size: 1.5rem;
-  font-weight: 300;
-  line-height: 1.2;
+/* WP7 turnstile: a landed packet swings in from its left edge. */
+@keyframes land {
+  from {
+    transform: perspective(40rem) rotateY(-90deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grid i {
+    animation: none;
+  }
 }
 
 /* Received items */
@@ -505,6 +520,28 @@ pre {
 
 .preview.mirrored {
   transform: scaleX(-1);
+}
+
+/* With the camera open the grid covers the preview: square tiles, each 80%
+   of its slot (`--cell`, set by JS), spread evenly over the whole video and
+   translucent so it reads through. */
+.stage {
+  position: relative;
+}
+
+.preview:not([hidden]) + .grid {
+  --unlit: rgba(0, 0, 0, 0.35);
+  position: absolute;
+  inset: 0;
+  grid-template-columns: repeat(var(--cols), var(--cell));
+  grid-auto-rows: var(--cell);
+  justify-content: space-evenly;
+  align-content: space-evenly;
+  gap: 0;
+}
+
+.preview:not([hidden]) + .grid i[data-s="2"] {
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
 }
 
 [hidden] {

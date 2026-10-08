@@ -21,10 +21,19 @@ export class Encoder {
   }
 
   next(type: PacketType = PacketType.Data): Packet {
-    if (this.nextSymbolId > MAX_SYMBOL_ID) {
-      throw new RangeError(`symbol ids exhausted past ${MAX_SYMBOL_ID}`);
+    const packet = this.symbol(this.nextSymbolId, type);
+    this.nextSymbolId++;
+    return packet;
+  }
+
+  symbol(symbolId: number, type: PacketType = PacketType.Data): Packet {
+    if (
+      !Number.isInteger(symbolId) || symbolId < 0 || symbolId > MAX_SYMBOL_ID
+    ) {
+      throw new RangeError(
+        `symbol id ${symbolId} is not an integer in 0..${MAX_SYMBOL_ID}`,
+      );
     }
-    const symbolId = this.nextSymbolId++;
     const data = new Uint8Array(DATA_BYTES);
     for (const block of blockSet(this.#transferId, symbolId, this.k)) {
       const offset = block * DATA_BYTES;

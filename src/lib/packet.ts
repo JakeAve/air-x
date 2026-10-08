@@ -1,5 +1,8 @@
 import { crc16 } from "./crc16.ts";
 import {
+  ACK_MAX_RUN,
+  ACK_RUN_BYTES,
+  ACK_RUNS,
   DATA_BYTES,
   MAX_K,
   MAX_SYMBOL_ID,
@@ -13,9 +16,16 @@ export enum PacketType {
   Data = 0,
   DataListen = 1,
   Done = 2,
+  /** Receiver to sender: data holds runs of missing blocks, symbolId the resolved count. */
+  Ack = 3,
 }
 
-const PACKET_TYPES = [PacketType.Data, PacketType.DataListen, PacketType.Done];
+const PACKET_TYPES = [
+  PacketType.Data,
+  PacketType.DataListen,
+  PacketType.Done,
+  PacketType.Ack,
+];
 
 const MAX_TRANSFER_ID = 2 ** 16 - 1;
 
@@ -83,4 +93,42 @@ export function decodePacket(bytes: Uint8Array): Packet | undefined {
     symbolId: (bytes[6] << 16) | (bytes[7] << 8) | bytes[8],
     data: bytes.slice(PACKET_HEADER_BYTES, PACKET_HEADER_BYTES + DATA_BYTES),
   };
+}
+
+export interface Run {
+  start: number;
+  length: number;
+}
+
+/** Packs runs as `start u24 | length u8` each; zero padding ends the list. */
+export function encodeAck(runs: Run[]): Uint8Array {
+  if (runs.length > ACK_RUNS) {
+    throw new RangeError(`${runs.length} runs, at most ${ACK_RUNS}`);
+  }
+  const data = new Uint8Array(DATA_BYTES);
+  runs.forEach(({ start, length }, i) => {
+    assertRange(start, MAX_K, "start");
+    if (length < 1) throw new RangeError(`length ${length} out of range`);
+    assertRange(length, ACK_MAX_RUN, "length");
+    const o = i * ACK_RUN_BYTES;
+    data[o] = (start >> 16) & 0xff;
+    data[o + 1] = (start >> 8) & 0xff;
+    data[o + 2] = start & 0xff;
+    data[o + 3] = length;
+  });
+  return data;
+}
+
+export function decodeAck(data: Uint8Array): Run[] {
+  const runs: Run[] = [];
+  for (let i = 0; i < ACK_RUNS; i++) {
+    const o = i * ACK_RUN_BYTES;
+    const length = data[o + 3];
+    if (!length) break;
+    runs.push({
+      start: (data[o] << 16) | (data[o + 1] << 8) | data[o + 2],
+      length,
+    });
+  }
+  return runs;
 }

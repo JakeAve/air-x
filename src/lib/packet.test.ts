@@ -1,5 +1,12 @@
 import { assertEquals, assertThrows } from "@std/assert";
-import { decodePacket, encodePacket, Packet, PacketType } from "./packet.ts";
+import {
+  decodeAck,
+  decodePacket,
+  encodeAck,
+  encodePacket,
+  Packet,
+  PacketType,
+} from "./packet.ts";
 import { DATA_BYTES, MAX_K, MAX_SYMBOL_ID, PACKET_BYTES } from "./protocol.ts";
 
 function seededRandom(seed: number) {
@@ -32,7 +39,12 @@ Deno.test("a packet round trips through encode and decode", () => {
 Deno.test("every packet type round trips", () => {
   const random = seededRandom(2);
   for (
-    const type of [PacketType.Data, PacketType.DataListen, PacketType.Done]
+    const type of [
+      PacketType.Data,
+      PacketType.DataListen,
+      PacketType.Done,
+      PacketType.Ack,
+    ]
   ) {
     const packet: Packet = {
       type,
@@ -129,4 +141,35 @@ Deno.test("encodePacket throws RangeError when data length is wrong", () => {
     () => encodePacket({ ...base, data: new Uint8Array(DATA_BYTES + 1) }),
     RangeError,
   );
+});
+
+Deno.test("an ack pins its exact bytes and round trips through a packet", () => {
+  const runs = [{ start: 0x010203, length: 4 }, { start: 7, length: 255 }];
+  const data = encodeAck(runs);
+  assertEquals(data.length, DATA_BYTES);
+  assertEquals(
+    [...data.subarray(0, 9)],
+    [1, 2, 3, 4, 0, 0, 7, 255, 0],
+  );
+  const packet: Packet = {
+    type: PacketType.Ack,
+    transferId: 9,
+    k: 100,
+    symbolId: 50,
+    data,
+  };
+  const back = decodePacket(encodePacket(packet))!;
+  assertEquals(back, packet);
+  assertEquals(decodeAck(back.data), runs);
+});
+
+Deno.test("decodeAck of all zeros is empty, and encodeAck rejects bad runs", () => {
+  assertEquals(decodeAck(new Uint8Array(DATA_BYTES)), []);
+  assertEquals(decodeAck(encodeAck([])), []);
+  const full = Array.from({ length: 13 }, (_, i) => ({ start: i, length: 1 }));
+  assertEquals(decodeAck(encodeAck(full)), full);
+  assertThrows(() => encodeAck([...full, { start: 0, length: 1 }]), RangeError);
+  assertThrows(() => encodeAck([{ start: 0, length: 0 }]), RangeError);
+  assertThrows(() => encodeAck([{ start: 0, length: 256 }]), RangeError);
+  assertThrows(() => encodeAck([{ start: MAX_K + 1, length: 1 }]), RangeError);
 });

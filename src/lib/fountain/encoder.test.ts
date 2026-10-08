@@ -75,6 +75,33 @@ Deno.test("next throws past MAX_SYMBOL_ID", () => {
   assertThrows(() => encoder.next(), RangeError);
 });
 
+Deno.test("symbol hands out any id without moving next", () => {
+  const bundle = seededBytes(4, 3 * DATA_BYTES + 5);
+  const padded = new Uint8Array(4 * DATA_BYTES);
+  padded.set(bundle);
+  const encoder = new Encoder(bundle, 9);
+  for (let i = 3; i >= 0; i--) {
+    const packet = encoder.symbol(i, PacketType.DataListen);
+    assertEquals(packet.symbolId, i);
+    assertEquals(packet.type, PacketType.DataListen);
+    assertEquals(
+      packet.data,
+      padded.slice(i * DATA_BYTES, (i + 1) * DATA_BYTES),
+    );
+  }
+  assertEquals(encoder.symbol(50).data, new Encoder(bundle, 9).symbol(50).data);
+  assertEquals(encoder.next().symbolId, 0);
+  assertEquals(encoder.next().symbolId, 1);
+});
+
+Deno.test("symbol throws on an id out of range", () => {
+  const encoder = new Encoder(new Uint8Array(1), 1);
+  assertEquals(encoder.symbol(MAX_SYMBOL_ID).symbolId, MAX_SYMBOL_ID);
+  for (const id of [MAX_SYMBOL_ID + 1, -1, 1.5, NaN]) {
+    assertThrows(() => encoder.symbol(id), RangeError);
+  }
+});
+
 Deno.test("a bundle over MAX_BUNDLE_BYTES throws", () => {
   const huge = { length: MAX_BUNDLE_BYTES + 1 } as Uint8Array;
   assertThrows(() => new Encoder(huge, 1), RangeError);

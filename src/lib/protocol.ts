@@ -11,6 +11,11 @@ export const DATA_BYTES = PACKET_BYTES - PACKET_HEADER_BYTES - PACKET_CRC_BYTES;
 /** Up to this many blocks, repair symbols are dense random rows instead of LT. */
 export const DENSE_MAX_K = 128;
 
+/** Ack data: up to ACK_RUNS runs of `start u24 | length u8`, zero padded. */
+export const ACK_RUNS = 13;
+export const ACK_RUN_BYTES = 4;
+export const ACK_MAX_RUN = 255;
+
 export const MAX_K = 2 ** 24 - 1;
 export const MAX_SYMBOL_ID = 2 ** 24 - 1;
 

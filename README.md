@@ -46,14 +46,14 @@ The pre-commit and pre-push hooks run `check` and `test`.
 Open `https://<host>:8444/diag.html` on two devices. Tap Send on one, type text
 or pick files, and press Send; tap Receive on the other and press Listen. Send
 by picks QR or sound (it defaults to sound for bundles up to 2 KB, else QR) and
-the line under it estimates how long each would take. Once repair symbols have
-cost more than the "ack after repair" ratio under its Advanced times the blocks
-still missing, a receiver asks for those blocks by sound (0 turns acks off);
-small bundles repair faster than that and never ack. Tuning inputs live under
-Advanced on each screen, and Start over in the top strip returns to the first
-screen. The log at the bottom records loss, rejected packets, and when DONE is
-sent and heard. Browsers only allow the microphone on secure origins, so for
-local testing over Wi-Fi the dev server needs a certificate. With
+the line under it estimates how long each would take. Once the sender's first
+pass is over, a receiver asks for the blocks it is still missing by sound every
+"ack every" symbols under its Advanced (0 turns acks off); small bundles repair
+inside one period and never ack. Tuning inputs live under Advanced on each
+screen, and Start over in the top strip returns to the first screen. The log at
+the bottom records loss, rejected packets, and when DONE is sent and heard.
+Browsers only allow the microphone on secure origins, so for local testing over
+Wi-Fi the dev server needs a certificate. With
 [mkcert](https://github.com/FiloSottile/mkcert):
 
 ```bash

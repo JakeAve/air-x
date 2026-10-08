@@ -158,13 +158,13 @@ export interface ReceiveOptions {
   /** Wait before each DONE or ack, so it lands after the sender's microphone is rolling again. */
   turnaroundMs?: number;
   /**
-   * Ack the missing blocks once the new repair symbols heard since the first
-   * pass ended, or since the last ack, reach this many times the missing block
-   * count; undefined never acks. Dense repair (k <= DENSE_MAX_K) completes in
-   * about missing + 2 symbols, so a ratio of 2 never fires there, only where LT
-   * repair costs several times the missing count.
+   * Once a transfer's first repair symbol is heard (its first pass is over),
+   * ack the missing blocks every this many new symbols heard, resends
+   * included, while any are missing; undefined never acks. The same rhythm at
+   * every size: a bundle of up to DENSE_MAX_K blocks repairs in fewer symbols
+   * than the default period, so it never acks.
    */
-  ackAfterRepair?: number;
+  ackEvery?: number;
   signal: AbortSignal;
   onProgress?: (p: ReceiveProgress) => void;
   onComplete?: (r: Received) => void;
@@ -180,7 +180,7 @@ export function receiveBundle(
     sources = [],
     silenceMs,
     turnaroundMs = 0,
-    ackAfterRepair,
+    ackEvery,
     signal,
     onProgress,
     onComplete,
@@ -204,8 +204,8 @@ export function receiveBundle(
     let timer: ReturnType<typeof setTimeout> | undefined;
     let completions = Promise.resolve();
     const lastSound = new Map<number, number>();
-    /** New repair symbols (id at or past k) heard per transfer since the first pass ended or the last ack. */
-    const repairHeard = new Map<number, number>();
+    /** Per transfer, once a repair symbol was heard: new symbols since then or since the last ack. */
+    const heardSince = new Map<number, number>();
     /** Transfer whose ack waits for the next DataListen. */
     let ackPending: number | undefined;
     /** Completion's DONE-or-silence step, held while an ack is in flight. */
@@ -287,7 +287,7 @@ export function receiveBundle(
         ], signal);
         if (finished) return;
         acked++;
-        repairHeard.set(transferId, 0);
+        heardSince.set(transferId, 0);
         onAck?.(transferId, runs);
       } catch (err) {
         if (!signal.aborted) finish(err);
@@ -351,20 +351,15 @@ export function receiveBundle(
         if (soundListen) sendDone();
         else if (fromSound) armSilence();
       } else if (
-        ackAfterRepair !== undefined && !received &&
-        packet.type !== PacketType.Done
+        ackEvery !== undefined && !received && packet.type !== PacketType.Done
       ) {
         const { transferId } = packet;
-        if (isNew && packet.symbolId >= packet.k) {
-          const heard = (repairHeard.get(transferId) ?? 0) + 1;
-          repairHeard.set(transferId, heard);
-          const transfer = receiver.progress().find((t) =>
-            t.transferId === transferId
-          );
-          if (
-            transfer &&
-            heard >= ackAfterRepair * (transfer.k - transfer.resolved)
-          ) tryAck(transferId);
+        const counting = heardSince.has(transferId) ||
+          packet.symbolId >= packet.k;
+        if (isNew && counting) {
+          const heard = (heardSince.get(transferId) ?? 0) + 1;
+          heardSince.set(transferId, heard);
+          if (heard >= ackEvery) tryAck(transferId);
         }
         if (soundListen && ackPending === transferId) sendAck(transferId);
       }

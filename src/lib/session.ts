@@ -204,6 +204,8 @@ export function receiveBundle(
     let lastIncomplete: number | undefined;
     /** Stalled transfer whose ack waits for the next DataListen. */
     let ackPending: number | undefined;
+    /** Completion's DONE-or-silence step, held while an ack is in flight. */
+    let afterAck: (() => void) | undefined;
     const resolvedOf = (transferId: number) =>
       receiver.progress().find((t) => t.transferId === transferId)?.resolved ??
         0;
@@ -296,10 +298,14 @@ export function receiveBundle(
         if (!signal.aborted) finish(err);
       } finally {
         sending = false;
+        // A transfer that completed meanwhile had its DONE blocked by `sending`.
+        if (!finished) {
+          const next = afterAck;
+          afterAck = undefined;
+          if (next) next();
+          else if (!received) armAck();
+        }
       }
-      // A transfer that completed meanwhile had its DONE blocked by `sending`.
-      if (received) sendDone();
-      else armAck();
     };
 
     const complete = async (completed: Completed, soundListen: boolean) => {
@@ -317,14 +323,13 @@ export function receiveBundle(
       const soundAt = lastSound.get(completed.transferId);
       lastSound.clear();
       onComplete?.(received);
-      if (
+      const kick = () =>
         soundListen || soundAt === undefined ||
-        Date.now() - soundAt >= silenceMs
-      ) {
-        sendDone();
-      } else {
-        armSilence();
-      }
+          Date.now() - soundAt >= silenceMs
+          ? sendDone()
+          : armSilence();
+      if (sending) afterAck = kick;
+      else kick();
     };
 
     const hearSymbol = (packet: Packet, fromSound: boolean) => {

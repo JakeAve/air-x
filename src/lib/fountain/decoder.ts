@@ -1,5 +1,5 @@
-import { type Packet, PacketType } from "../packet.ts";
-import { DATA_BYTES, MAX_BUNDLE_BYTES } from "../protocol.ts";
+import { type Packet, PacketType, type Run } from "../packet.ts";
+import { ACK_MAX_RUN, DATA_BYTES, MAX_BUNDLE_BYTES } from "../protocol.ts";
 import { blockSet } from "./symbols.ts";
 
 // Bounds one elimination to about 512² bit operations; above it peeling alone
@@ -46,11 +46,35 @@ export class Decoder {
     return out;
   }
 
+  /**
+   * Runs of unresolved blocks in block order, each at most `ACK_MAX_RUN` long.
+   * Pending coverage does not count: a block only a pending symbol touches is
+   * still missing. Empty before `k` is known.
+   */
+  missingRuns(maxRuns: number): Run[] {
+    const runs: Run[] = [];
+    const k = this.#k ?? 0;
+    for (let b = 0; b < k; b++) {
+      if (this.#isResolved[b]) continue;
+      const last = runs[runs.length - 1];
+      if (last && last.start + last.length === b && last.length < ACK_MAX_RUN) {
+        last.length++;
+      } else if (runs.length < maxRuns) {
+        runs.push({ start: b, length: 1 });
+      } else {
+        break;
+      }
+    }
+    return runs;
+  }
+
   push(packet: Packet): Uint8Array | undefined {
     if (this.#k !== undefined && this.#resolved === this.#k) {
       return this.#blocks;
     }
-    if (packet.type === PacketType.Done) return undefined;
+    if (packet.type === PacketType.Done || packet.type === PacketType.Ack) {
+      return undefined;
+    }
 
     if (this.#k === undefined) {
       if (packet.k < 1 || packet.k * DATA_BYTES > MAX_BUNDLE_BYTES) {

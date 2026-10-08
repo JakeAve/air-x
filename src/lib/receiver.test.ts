@@ -148,3 +148,13 @@ Deno.test("forget clears the decoder so a fresh transfer can restart", () => {
   }
   assertEquals(restartedResult, { transferId: 6, bundle: padded(bundle, 2) });
 });
+
+Deno.test("Ack packets are ignored and create no transfer", () => {
+  const receiver = new Receiver();
+  const ack: Packet = {
+    ...new Encoder(new Uint8Array(DATA_BYTES), 3).next(),
+    type: PacketType.Ack,
+  };
+  assertEquals(receiver.push(ack, 0), undefined);
+  assertEquals(receiver.progress(), []);
+});

@@ -10,7 +10,6 @@ import type { SoundProtocol } from "@/lib/sound/ggwave.ts";
 
 const SILENCE_MS = 12_000;
 const SOUND_DEFAULT_MAX_BYTES = 2048;
-const RATE_WINDOW_MS = 5000;
 /** Packets the sender expects to need: k plus 10 % repair. */
 const OVERHEAD = 1.1;
 
@@ -41,7 +40,6 @@ const flipButton = $<HTMLButtonElement>("flip");
 const preview = $<HTMLVideoElement>("preview");
 const scanMaxEdgeInput = $<HTMLInputElement>("scan-max-edge");
 const turnaroundMsInput = $<HTMLInputElement>("turnaround-ms");
-const rxCamera = $<HTMLParagraphElement>("rx-camera");
 const listenButton = $<HTMLButtonElement>("listen");
 const receivedItems = $<HTMLUListElement>("received-items");
 const logEl = $<HTMLPreElement>("log");
@@ -74,8 +72,75 @@ function positive(input: HTMLInputElement, fallback: number): number {
   return Math.max(0, Number(input.value) || 0) || fallback;
 }
 
-function bar(id: string, fraction: number) {
-  $(id).style.width = `${Math.min(100, Math.round(fraction * 100))}%`;
+// Packet grids: one cell per block (receive) or per expected packet (send).
+// Past MAX_CELLS each cell stands for a run of ceil(n / MAX_CELLS).
+// Cell states: 0 unlit, 1 mango frame (pending / partial), 2 mango, 3 white.
+const MAX_CELLS = 512;
+
+// Columns for `cells` tiles spread over a `w` by `h` box: about as wide as
+// tall for that box, preferring a count that fills the last row, and unless
+// the tiles `cover` the box with their spacing, never so few that square
+// tiles would overflow its height (32 columns max).
+function columns(cells: number, w: number, h: number, cover: boolean) {
+  if (cells <= 8) return Math.max(1, cells);
+  const target = Math.sqrt(cells * w / Math.max(1, h));
+  const fits = (c: number) =>
+    cover || c === 32 || Math.ceil(cells / c) * (w / c) <= h;
+  let best = 0;
+  let bestScore = Infinity;
+  for (let c = Math.ceil(target * 0.7); c <= 32; c++) {
+    if (!fits(c)) continue;
+    if (c > Math.ceil(target * 1.25) && best) break;
+    const empty = (c - cells % c) % c;
+    const score = empty * 100 + Math.abs(c - target);
+    if (score < bestScore) [best, bestScore] = [c, score];
+  }
+  return best || 32;
+}
+
+// Standing alone the tiles are squares the columns size, bounded by the box.
+// With `cover` (over the camera) each tile is 80% of its slot and the spacing
+// spreads the field over the whole box.
+function gridReset(id: string, n: number, w: number, h: number, cover = false) {
+  const el = $(id);
+  el.hidden = false;
+  const per = Math.ceil(n / MAX_CELLS);
+  const cells = Math.ceil(n / per);
+  el.dataset.per = String(per);
+  const cols = columns(cells, w, h, cover);
+  el.style.setProperty("--cols", String(cols));
+  el.style.setProperty("--cell-gap", cols <= 16 ? "0.25rem" : "0.125rem");
+  if (cover) {
+    const rows = Math.ceil(cells / cols);
+    const px = Math.min(w / cols, h / rows) * 0.8;
+    const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    el.style.setProperty("--cell", `${(px / rem).toFixed(3)}rem`);
+  }
+  el.replaceChildren(
+    ...Array.from({ length: cells }, () => document.createElement("i")),
+  );
+}
+
+function gridMark(id: string, index: number, state: number) {
+  const el = $(id);
+  const cell = Math.floor(index / Number(el.dataset.per || 1));
+  while (el.children.length <= cell) el.append(document.createElement("i"));
+  (el.children[cell] as HTMLElement).dataset.s = String(state);
+}
+
+function gridPaint(id: string, states: Uint8Array) {
+  const el = $(id);
+  const per = Number(el.dataset.per || 1);
+  for (let c = 0; c < el.children.length; c++) {
+    let min = 2, max = 0;
+    for (let b = c * per; b < Math.min(states.length, (c + 1) * per); b++) {
+      if (states[b] < min) min = states[b];
+      if (states[b] > max) max = states[b];
+    }
+    (el.children[c] as HTMLElement).dataset.s = String(
+      min === 2 ? 2 : max ? 1 : 0,
+    );
+  }
 }
 
 // Screens: the hash picks one; leaving a screen stops whatever it was doing.
@@ -275,7 +340,7 @@ sendButton.addEventListener("click", async () => {
     sendForm.hidden = true;
     sendRun.hidden = false;
     qrCanvas.hidden = !useQr;
-    bar("send-bar", 0);
+    gridReset("send-grid", n, $("send-grid").clientWidth, innerHeight / 2);
     show("send-count", `0 of ${n} packets`);
     sendButton.textContent = "Stop";
     sendButton.classList.remove("primary");
@@ -293,15 +358,28 @@ sendButton.addEventListener("click", async () => {
           : ""),
     );
     let announced = false;
+    // Past the first n packets the grid empties and refills once per pass.
+    let pass = 0;
     result = await sendBundle(bundle, {
       listen: sound,
       sound: useSound ? { channel: sound, listenEvery, windowMs } : undefined,
       qr: useQr ? { display: qr, packetsPerCode, fps } : undefined,
       signal: controller.signal,
-      onProgress: ({ transferId, k, soundSent, qrSent }) => {
+      onProgress: ({ transferId, k, soundSent, qrSent, via, symbolIds }) => {
         const sent = soundSent + qrSent;
-        bar("send-bar", sent / n);
-        show("send-count", `${sent} of ${n} packets`);
+        for (const id of symbolIds) {
+          if (Math.floor(id / n) > pass) {
+            pass = Math.floor(id / n);
+            for (const cell of $("send-grid").children) {
+              (cell as HTMLElement).dataset.s = "0";
+            }
+          }
+          gridMark("send-grid", id % n, via === "qr" ? 2 : 3);
+        }
+        show(
+          "send-count",
+          pass ? `${n} packets · pass ${pass + 1}` : `${sent} of ${n} packets`,
+        );
         if (!announced) {
           announced = true;
           log(`send: transfer ${transferId}, k ${k}`);
@@ -315,9 +393,9 @@ sendButton.addEventListener("click", async () => {
         : `send: stopped after ${elapsed}`,
     );
     if (result === "done") {
-      bar("send-bar", 1);
       stopTicker();
       stopTicker = undefined;
+      $("send-grid").hidden = true;
       show("send-time", `${elapsed} · DONE heard`);
     }
   } catch (err) {
@@ -370,12 +448,12 @@ async function watchCamera(qr: QrTransport) {
   } catch (err) {
     log(`camera failed: ${err}`);
   }
-  preview.hidden = flipButton.hidden = rxCamera.hidden = !qr.watching;
+  preview.hidden = flipButton.hidden = !qr.watching;
 }
 
 function closeCamera() {
   devices?.qr.stopWatching();
-  preview.hidden = flipButton.hidden = rxCamera.hidden = true;
+  preview.hidden = flipButton.hidden = true;
 }
 
 cameraToggle.addEventListener("change", () => {
@@ -411,14 +489,13 @@ listenButton.addEventListener("click", async () => {
   const controller = new AbortController();
   running = controller;
   let stopTicker: (() => void) | undefined;
-  let stopPolling: (() => void) | undefined;
   let received = false;
   receiveTitle.textContent = "listening";
   receiveForm.hidden = true;
   receiveRun.hidden = false;
   listenButton.textContent = "Stop";
   listenButton.classList.remove("primary");
-  bar("rx-bar", 0);
+  gridReset("rx-grid", 0, 1, 1);
   show("rx-count", "waiting for a transfer");
   try {
     const { sound, qr } = await opened;
@@ -430,20 +507,6 @@ listenButton.addEventListener("click", async () => {
     Object.assign(qr.stats, { frames: 0, codes: 0, packets: 0 });
     const start = performance.now();
     stopTicker = ticker("rx-time", start);
-    let sourceNew = 0;
-    const samples: [time: number, sourceNew: number][] = [];
-    const poll = setInterval(() => {
-      const now = performance.now();
-      samples.push([now, sourceNew]);
-      while (now - samples[0][0] > RATE_WINDOW_MS) samples.shift();
-      const [then, newThen] = samples[0];
-      const rate = now > then ? (sourceNew - newThen) * 1000 / (now - then) : 0;
-      rxCamera.textContent =
-        `${qr.stats.codes} codes in ${qr.stats.frames} frames · ${
-          rate.toFixed(1)
-        } new packets/s`;
-    }, 500);
-    stopPolling = () => clearInterval(poll);
     const turnaround = turnaroundMs();
     log(
       `receive: listening, camera ${
@@ -451,6 +514,7 @@ listenButton.addEventListener("click", async () => {
       }, turnaround ${turnaround} ms`,
     );
     let counts = "sound 0, qr 0, rejected 0";
+    let shown: number | undefined;
     const done = await receiveBundle({
       sound,
       sources: scanningQr ? [qr] : undefined,
@@ -461,25 +525,42 @@ listenButton.addEventListener("click", async () => {
         {
           soundHeard,
           sourceHeard: qrHeard,
-          sourceNew: qrNew,
           rejected,
           transfers,
         },
       ) => {
-        sourceNew = qrNew;
         counts = `sound ${soundHeard}, qr ${qrHeard}, rejected ${rejected}`;
         const t = transfers.reduce(
           (best, t) => t.resolved > best.resolved ? t : best,
           transfers[0],
         );
         if (t) {
-          bar("rx-bar", t.resolved / t.k);
+          if (t.transferId !== shown) {
+            shown = t.transferId;
+            if (preview.hidden) {
+              gridReset(
+                "rx-grid",
+                t.k,
+                $("rx-grid").clientWidth,
+                innerHeight / 2,
+              );
+            } else {
+              gridReset(
+                "rx-grid",
+                t.k,
+                preview.clientWidth,
+                preview.clientHeight,
+                true,
+              );
+            }
+          }
+          gridPaint("rx-grid", t.states());
           show("rx-count", `${t.resolved} of ${t.k} blocks`);
         }
       },
       onComplete: ({ transferId, items }) => {
         received = true;
-        bar("rx-bar", 1);
+        $("rx-grid").hidden = true;
         log(
           `receive: transfer ${transferId} complete after ${
             seconds(performance.now() - start)
@@ -507,7 +588,6 @@ listenButton.addEventListener("click", async () => {
     log(`receive failed: ${err}`);
   } finally {
     stopTicker?.();
-    stopPolling?.();
     running = undefined;
     scanningQr = false;
     closeCamera();

@@ -15,13 +15,13 @@ already lives in `static/styles.css`; extend it, do not fork it.
 | ------------------------ | ------------------- | -------------------------------------------------------------------------------------------- |
 | `--bg`                   | `#000000`           | page ground                                                                                  |
 | `--ink`                  | `#ffffff`           | text, outline buttons, radio ring when checked                                               |
-| `--surface`              | `#141414`           | input fills, item cards                                                                      |
-| `--surface-2`            | `#1a1a1a`           | camera preview, progress track                                                               |
+| `--surface`              | `#141414`           | input fills, item cards, unlit grid tiles                                                    |
+| `--surface-2`            | `#1a1a1a`           | camera preview                                                                               |
 | `--hairline`             | `#2a2a2a`           | 1px dividers (`<hr>`), card and preview edges                                                |
 | `--border`               | `#4d4d4d`           | 2px input borders at rest, unchecked radio ring, switch track off                            |
 | `--muted`                | `#9a9a9a`           | secondary text, estimates, elapsed time                                                      |
 | `--label`                | `#c2c2c2`           | field labels, lede, item meta                                                                |
-| `--accent`               | `#ffa31a`           | mango: tiles, primary button, links, expander summaries, radio dot, switch on, progress fill |
+| `--accent`               | `#ffa31a`           | mango: tiles, primary button, links, expander summaries, radio dot, switch on, lit grid cell |
 | `--accent-press`         | `#d98400`           | pressed tile and primary button                                                              |
 | `--b1` / `--b2` / `--b3` | 1 / 2 / 3 px in rem | hairline / input and radio / button and file chooser                                         |
 | `--gap`                  | `1.5rem`            | page margin (WP7's 24px) and rhythm between sections                                         |
@@ -85,9 +85,24 @@ inside a `.stack` sit 1rem apart; label to control is 0.5rem; two-up `.row` and
 - **Tiles** (`.tile`): square via `aspect-ratio`, mango fill, black stroke icon
   2.5rem top-left, 1.25rem label bottom-left. Icons are inline SVG, stroke 1.5
   on a 24 grid, square caps. Never emoji or glyph fonts.
-- **Progress**: a `.bar` track 0.375rem tall on `--surface-2` with a mango `<i>`
-  whose width JS sets, then a `.progress` row: `.count` (1.5rem light) left,
-  muted timing right. One line each; the log holds the detail.
+- **Progress**: a `.grid` of square `<i>` tiles, one per block when receiving or
+  per expected packet when sending (at most 512; past that each stands for a
+  run). JS gives the grid a box to spread over and sets `--cols` from it: one
+  row up to 8 cells, then about as wide as tall for that box, preferring a count
+  that fills the last row, never so few that squares overflow the box, 32
+  columns max. Standing alone the box is the column width by half the viewport,
+  so the grid never takes more than half the screen; `--cell-gap` is 0.25rem up
+  to 16 columns, else 0.125rem. `data-s` picks the look: 0 a `--surface` plate,
+  1 an open `--b2` mango frame (block covered by a pending symbol, or a run
+  partly done), 2 solid `--accent` (resolved, or sent by QR), 3 solid `--ink`
+  (sent by sound). A tile that lands swings in from its left edge
+  (`@keyframes land`, the WP7 turnstile, off under reduced motion). On the
+  receive screen the grid sits in a `.stage` after the `.preview`; while the
+  camera is open its box is the preview itself: it covers the video edge to edge
+  with `--b1` gaps, tiles stretch to the video's shape, unlit ones are a 35%
+  black scrim (`--unlit`) and resolved ones 70% mango, so the picture reads
+  through. Then a `.progress` row: `.count` (1.5rem light) left, muted timing
+  right. One line each; the log holds the detail.
 - **Hairlines**: `<hr>` between groups on a form screen. Cards (`.items li`,
   `.preview`) get a `--b1` `--hairline` edge on `--surface` or `--surface-2`.
 

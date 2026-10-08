@@ -168,3 +168,25 @@ Deno.test("Encoder to Decoder to decodeBundle recovers the items", async () => {
   assert(bytes.length === encoder.k * DATA_BYTES);
   assertEquals(await decodeBundle(bytes), items);
 });
+
+Deno.test("states: unseen, pending, then resolved per block", () => {
+  const k = 4;
+  const encoder = new Encoder(randomBytes(seededRandom(7), k * DATA_BYTES), 3);
+  const decoder = new Decoder();
+  assertEquals(decoder.states(), new Uint8Array(0));
+  // Systematic symbol 1 resolves block 1 alone.
+  const symbols = Array.from({ length: 4 * k }, () => encoder.next());
+  decoder.push(symbols[1]);
+  assertEquals(decoder.states(), Uint8Array.of(0, 2, 0, 0));
+  // The first repair symbol touching more than one unresolved block pends them.
+  const repair = symbols.slice(k).find((s) => {
+    decoder.push(s);
+    return decoder.states().includes(1);
+  });
+  assert(repair, "no repair symbol left blocks pending");
+  const states = decoder.states();
+  assertEquals(states[1], 2);
+  assert([...states].filter((s) => s === 1).length >= 2);
+  feed(decoder, symbols);
+  assertEquals(decoder.states(), Uint8Array.of(2, 2, 2, 2));
+});

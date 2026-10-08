@@ -45,12 +45,13 @@ deno task e2e     # build, then headless-Chromium receive test: sound-only via f
   URLs, which point at the Pages site. Visual rules live in
   `.claude/skills/air-x-style/SKILL.md`; read it before touching markup or CSS.
 - `src/diag.ts` — the page: three screens picked by the hash (`#home`, `#send`,
-  `#receive`; leaving a screen aborts its transfer). Send text and files by QR,
-  sound, or both (the Send by radio defaults to both for bundles up to 2048
-  bytes, else QR, until picked by hand) with a live time estimate; receive from
-  camera and mic at once; log. One button per screen flips between Send/Listen
-  and Stop. Tuning inputs sit under Advanced. Defaults: 8 packets per code, 5
-  fps, ECC medium; camera on, scan max edge 1280; silence 12 s.
+  `#receive`; leaving a screen aborts its transfer). Send text and files by QR
+  or sound (the Send by radio defaults to sound for bundles up to 2048 bytes,
+  else QR, until picked by hand) with a live time estimate of both; receive from
+  camera and mic at once; log, including acks on both ends. One button per
+  screen flips between Send/Listen and Stop. Tuning inputs sit under Advanced.
+  Defaults: 8 packets per code, 5 fps, ECC medium; camera on, scan max edge
+  1280, ack after repair 2x missing (0 never acks); silence 12 s.
 - `src/adapters/` — the only browser-API code besides the entries: `pageLink.ts`
   (`openDevices`: one codec worker shared by both transports),
   `soundTransport.ts` (`SoundTransport`, a `PacketChannel`), `qrTransport.ts`
@@ -87,14 +88,23 @@ gitignored).
   `send(packets, signal)`), `PacketDisplay` (`show`, `clear`).
 - `receiver.ts` — `Receiver`: one decoder per interleaved transfer, evicts stale
   ones.
-- `session.ts` — `sendBundle` (sound bursts of `listenEvery` then a listen
-  window, and QR codes of `packetsPerCode` at `fps`, from one encoder until DONE
-  is heard) and `receiveBundle` (sound plus any `sources`; sends DONE by sound).
-  Silence rules count sound only: once complete, DONE goes out at once if no
-  sound from the transfer was heard within `silenceMs`, else after `silenceMs`
-  of sound silence or on a `DataListen`. After DONE, packets of that transfer
-  (QR included) mean the sender missed it, so silence re-sends DONE; silence
-  with nothing heard since DONE finishes.
+- `session.ts` — `sendBundle` (sound or QR, never both: sound bursts of
+  `listenEvery` then a listen window, or QR codes of `packetsPerCode` at `fps`,
+  until DONE is heard; Ack packets heard on `listen` queue their blocks, and
+  each burst or code sends queued blocks before fresh symbols) and
+  `receiveBundle` (sound plus any `sources`; sends DONE by sound). Silence rules
+  count sound only: once complete, DONE goes out at once if no sound from the
+  transfer was heard within `silenceMs`, else after `silenceMs` of sound silence
+  or on a `DataListen`. After DONE, packets of that transfer (QR included) mean
+  the sender missed it, so silence re-sends DONE; silence with nothing heard
+  since DONE finishes. With `ackAfterRepair` set, once the new repair symbols
+  heard for a transfer (since its first pass ended or its last ack) reach that
+  ratio times the blocks still missing, the receiver sends an `Ack` by sound
+  naming its missing runs, with DONE's timing and `turnaroundMs`. Dense repair
+  (k <= 128) completes in about missing + 2 symbols, so the default ratio of 2
+  only fires for LT-sized bundles, where repair costs several times the missing
+  count. Acks heard from other receivers count as neither symbols nor sound from
+  the transfer.
 - `qr/` — `qrEncoder.ts` (packets into one byte-mode code, `QrEcc`),
   `qrDecoder.ts` (RGBA frame to packets), `bytesAsText.ts`, `rasterize.ts`
   (`QR_COLORS`, test images).

@@ -190,3 +190,36 @@ Deno.test("states: unseen, pending, then resolved per block", () => {
   feed(decoder, symbols);
   assertEquals(decoder.states(), Uint8Array.of(2, 2, 2, 2));
 });
+
+function systematic(k: number): Packet[] {
+  const encoder = new Encoder(new Uint8Array(k * DATA_BYTES).fill(7), 5);
+  return Array.from({ length: k }, () => encoder.next());
+}
+
+Deno.test("missingRuns lists unresolved blocks as runs", () => {
+  const decoder = new Decoder();
+  assertEquals(decoder.missingRuns(13), []);
+  const packets = systematic(10);
+  for (const b of [0, 1, 2, 3, 6]) decoder.push(packets[b]);
+  assertEquals(decoder.missingRuns(13), [
+    { start: 4, length: 2 },
+    { start: 7, length: 3 },
+  ]);
+  assertEquals(decoder.missingRuns(1), [{ start: 4, length: 2 }]);
+});
+
+Deno.test("missingRuns splits runs longer than ACK_MAX_RUN", () => {
+  const decoder = new Decoder();
+  decoder.push(systematic(301)[0]);
+  assertEquals(decoder.missingRuns(13), [
+    { start: 1, length: 255 },
+    { start: 256, length: 45 },
+  ]);
+});
+
+Deno.test("an Ack packet is ignored by the decoder", () => {
+  const ack = { ...systematic(2)[0], type: PacketType.Ack };
+  const decoder = new Decoder();
+  assertEquals(decoder.push(ack), undefined);
+  assertEquals(decoder.k, undefined);
+});

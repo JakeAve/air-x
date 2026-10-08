@@ -3,12 +3,19 @@ import { sleep } from "./abort.ts";
 import { encodeBundle, type Item } from "./bundle.ts";
 import type { PacketChannel, PacketDisplay, PacketSource } from "./channel.ts";
 import { Encoder } from "./fountain/encoder.ts";
-import { decodePacket, encodePacket, PacketType } from "./packet.ts";
+import {
+  decodePacket,
+  encodeAck,
+  encodePacket,
+  PacketType,
+  type Run,
+} from "./packet.ts";
 import {
   receiveBundle,
   type Received,
   type ReceiveProgress,
   sendBundle,
+  type SendProgress,
 } from "./session.ts";
 
 const AIRTIME_MS = 3;
@@ -92,17 +99,23 @@ class Party implements PacketChannel {
 /** A screen and camera: each shown code reaches listeners whole, unless its frame is missed. */
 class Display implements PacketDisplay, PacketSource {
   cleared = false;
+  shown = 0;
   readonly #random: () => number;
   readonly #loss: number;
+  readonly #dropCodes: number[];
   readonly #listeners = new Set<(bytes: Uint8Array) => void>();
 
-  constructor(options: { seed: number; loss?: number }) {
+  /** `dropCodes`: zero-based indexes of shown codes the camera misses. */
+  constructor(options: { seed: number; loss?: number; dropCodes?: number[] }) {
     this.#random = seededRandom(options.seed);
     this.#loss = options.loss ?? 0;
+    this.#dropCodes = options.dropCodes ?? [];
   }
 
   show(packets: Uint8Array[]): void {
     this.cleared = false;
+    const index = this.shown++;
+    if (this.#dropCodes.includes(index)) return;
     if (this.#random() < this.#loss) return;
     for (const packet of packets) {
       for (const listener of this.#listeners) listener(packet);
@@ -362,34 +375,51 @@ Deno.test("a QR-only transfer completes over lost codes and DONE goes out at onc
   assertEquals((await received)?.items, items);
 });
 
-Deno.test("sound and QR together use fewer sound packets than sound alone", async () => {
-  const items = testItems(2_000);
-  const bundle = await encodeBundle(items);
+Deno.test("sendBundle takes sound or qr, not both", async () => {
+  const air = new Air({ seed: 0 });
+  const channel = air.party();
+  await assertRejects(
+    () =>
+      sendBundle(new Uint8Array(1), {
+        ...sound(channel, LISTEN_EVERY, WINDOW_MS),
+        qr: { display: new Display({ seed: 0 }), packetsPerCode: 1, fps: 1 },
+        signal: new AbortController().signal,
+      }),
+    RangeError,
+  );
+});
 
-  const soundPackets = async (withQr: boolean) => {
-    const air = new Air({ seed: 9, loss: 0.2 });
-    const display = new Display({ seed: 9, loss: 0.3 });
-    let soundSent = 0;
-    const received = receiveBundle({
-      sound: air.party(),
-      sources: [display],
-      silenceMs: SILENCE_MS,
-      signal: new AbortController().signal,
-    });
-    const sent = await sendBundle(bundle, {
-      ...sound(air.party(), LISTEN_EVERY, WINDOW_MS),
-      qr: withQr ? { display, packetsPerCode: 2, fps: 50 } : undefined,
-      signal: new AbortController().signal,
-      onProgress: (p) => soundSent = p.soundSent,
-    });
-    assertEquals(sent, "done");
-    assertEquals((await received)?.items, items);
-    return soundSent;
-  };
+Deno.test("an Ack queues its blocks ahead of fresh symbols", async () => {
+  const bundle = await encodeBundle(testItems(2_000));
+  const air = new Air({ seed: 12 });
+  const listen = air.party();
+  const stop = new AbortController();
+  const events: SendProgress[] = [];
+  let acked = false;
 
-  const alone = await soundPackets(false);
-  const together = await soundPackets(true);
-  assert(together < alone, `${together} >= ${alone}`);
+  const sent = sendBundle(bundle, {
+    listen,
+    qr: { display: new Display({ seed: 12 }), packetsPerCode: 4, fps: 100 },
+    signal: stop.signal,
+    onProgress: (p) => {
+      events.push(p);
+      if (acked) return stop.abort();
+      acked = true;
+      (listen as Party).hear(encodePacket({
+        type: PacketType.Ack,
+        transferId: p.transferId,
+        k: p.k,
+        symbolId: 0,
+        data: encodeAck([{ start: 2, length: 3 }]),
+      }));
+    },
+  });
+
+  assertEquals(await sent, "stopped");
+  assert(events[0].k > 5);
+  assertEquals(events[1].symbolIds.slice(0, 3), [2, 3, 4]);
+  assertEquals(events[1].symbolIds[3], 4);
+  assertEquals(events[1].acked, 3);
 });
 
 Deno.test("a source that delivers each code twice counts sourceNew once per symbol", async () => {
@@ -452,4 +482,153 @@ Deno.test("a QR-only transfer whose DONE is lost gets DONE again after silence, 
   assertEquals(dones.length, 2);
   assert(dones[1] - dones[0] >= SILENCE_MS);
   assert(Date.now() - start - dones[1] >= SILENCE_MS);
+});
+
+Deno.test("a QR receiver acks the blocks of dropped codes and the sender resends them", async () => {
+  const items = testItems(2_000);
+  const bundle = await encodeBundle(items);
+  const air = new Air({ seed: 13 });
+  const packetsPerCode = 4;
+  const display = new Display({ seed: 13, dropCodes: [3, 7] });
+  const stopReceiver = new AbortController();
+  const acks: Run[][] = [];
+  let last: SendProgress | undefined;
+
+  const received = receiveBundle({
+    sound: air.party(),
+    sources: [display],
+    silenceMs: 60_000,
+    ackAfterRepair: 0.5,
+    signal: stopReceiver.signal,
+    onAck: (_, runs) => acks.push(runs),
+  });
+  const sent = await sendBundle(bundle, {
+    listen: air.party(),
+    qr: { display, packetsPerCode, fps: 20 },
+    signal: new AbortController().signal,
+    onProgress: (p) => last = p,
+  });
+
+  assertEquals(sent, "done");
+  stopReceiver.abort();
+  assertEquals((await received)?.items, items);
+  assert(last);
+  assertEquals(last!.k, 41);
+  assert(acks.length >= 1);
+  // A repair symbol may peel a dropped block by luck before the ack, so the
+  // first ack names some of code 3's blocks, and nothing outside the drops.
+  const blocks = (code: number) =>
+    Array.from({ length: packetsPerCode }, (_, i) => code * packetsPerCode + i);
+  const dropped = new Set([...blocks(3), ...blocks(7)]);
+  const ackedBlocks = acks[0].flatMap(({ start, length }) =>
+    Array.from({ length }, (_, i) => start + i)
+  );
+  assert(ackedBlocks.every((b) => dropped.has(b)));
+  assert(blocks(3).some((b) => ackedBlocks.includes(b)));
+  assert(last!.qrSent < last!.k + 2 * packetsPerCode + 8);
+});
+
+Deno.test("dense repair finishes before a budget of 2x missing, so no ack goes out", async () => {
+  const items = testItems(2_000);
+  const bundle = await encodeBundle(items);
+  const air = new Air({ seed: 13 });
+  const display = new Display({ seed: 13, dropCodes: [3, 7] });
+  const stopReceiver = new AbortController();
+  let last: ReceiveProgress | undefined;
+
+  const received = receiveBundle({
+    sound: air.party(),
+    sources: [display],
+    silenceMs: 60_000,
+    ackAfterRepair: 2,
+    signal: stopReceiver.signal,
+    onProgress: (p) => last = p,
+  });
+  const sent = await sendBundle(bundle, {
+    listen: air.party(),
+    qr: { display, packetsPerCode: 4, fps: 20 },
+    signal: new AbortController().signal,
+  });
+
+  assertEquals(sent, "done");
+  stopReceiver.abort();
+  assertEquals((await received)?.items, items);
+  assertEquals(last!.acked, 0);
+});
+
+Deno.test("a QR transfer that completes during an ack's turnaround still gets DONE", async () => {
+  const items = testItems(2_000);
+  const bundle = await encodeBundle(items);
+  const air = new Air({ seed: 15 });
+  // Codes land every 10 ms: the first past-k code meets the budget and starts
+  // the ack, and the next codes complete the transfer inside the 30 ms
+  // turnaround sleep.
+  const display = new Display({ seed: 15, dropCodes: [3] });
+  const stopReceiver = new AbortController();
+  const stopSender = new AbortController();
+  const giveUp = setTimeout(() => stopSender.abort(), 3_000);
+
+  const received = receiveBundle({
+    sound: air.party(),
+    sources: [display],
+    silenceMs: 60_000,
+    turnaroundMs: 30,
+    ackAfterRepair: 0.25,
+    signal: stopReceiver.signal,
+  });
+  const sent = await sendBundle(bundle, {
+    listen: air.party(),
+    qr: { display, packetsPerCode: 4, fps: 100 },
+    signal: stopSender.signal,
+  });
+  clearTimeout(giveUp);
+
+  assertEquals(sent, "done");
+  stopReceiver.abort();
+  assertEquals((await received)?.items, items);
+});
+
+Deno.test("a sound receiver acks once repair costs a quarter of the missing count and completes", async () => {
+  const items = testItems(4_000);
+  const bundle = await encodeBundle(items);
+  const air = new Air({ seed: 14, loss: 0.2 });
+  let last: ReceiveProgress | undefined;
+
+  const received = receiveBundle({
+    sound: air.party(),
+    silenceMs: SILENCE_MS,
+    ackAfterRepair: 0.25,
+    signal: new AbortController().signal,
+    onProgress: (p) => last = p,
+  });
+  const sent = await sendBundle(bundle, {
+    ...sound(air.party(), LISTEN_EVERY, WINDOW_MS),
+    signal: new AbortController().signal,
+  });
+
+  assertEquals(sent, "done");
+  assertEquals((await received)?.items, items);
+  assert(last!.acked >= 1);
+});
+
+Deno.test("without ackAfterRepair a receiver never acks", async () => {
+  const items = testItems(4_000);
+  const bundle = await encodeBundle(items);
+  const air = new Air({ seed: 14, loss: 0.2 });
+  let last: ReceiveProgress | undefined;
+
+  const received = receiveBundle({
+    sound: air.party(),
+    silenceMs: SILENCE_MS,
+    signal: new AbortController().signal,
+    onProgress: (p) => last = p,
+  });
+  const sent = await sendBundle(bundle, {
+    ...sound(air.party(), LISTEN_EVERY, WINDOW_MS),
+    signal: new AbortController().signal,
+  });
+
+  assertEquals(sent, "done");
+  assertEquals((await received)?.items, items);
+  assertEquals(last!.acked, 0);
 });

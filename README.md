@@ -45,13 +45,16 @@ The pre-commit and pre-push hooks run `check` and `test`.
 
 Open `https://<host>:8444/diag.html` on two devices. Tap Send on one, type text
 or pick files, and press Send; tap Receive on the other and press Listen. Send
-by picks QR, sound, or both (it defaults to both for bundles up to 2 KB, else
-QR) and the line under it estimates how long each channel would take. Tuning
-inputs live under Advanced on each screen, and Start over in the top strip
-returns to the first screen. The log at the bottom records loss, rejected
-packets, and when DONE is sent and heard. Browsers only allow the microphone on
-secure origins, so for local testing over Wi-Fi the dev server needs a
-certificate. With [mkcert](https://github.com/FiloSottile/mkcert):
+by picks QR or sound (it defaults to sound for bundles up to 2 KB, else QR) and
+the line under it estimates how long each would take. Once repair symbols have
+cost more than the "ack after repair" ratio under its Advanced times the blocks
+still missing, a receiver asks for those blocks by sound (0 turns acks off);
+small bundles repair faster than that and never ack. Tuning inputs live under
+Advanced on each screen, and Start over in the top strip returns to the first
+screen. The log at the bottom records loss, rejected packets, and when DONE is
+sent and heard. Browsers only allow the microphone on secure origins, so for
+local testing over Wi-Fi the dev server needs a certificate. With
+[mkcert](https://github.com/FiloSottile/mkcert):
 
 ```bash
 mkdir -p .certs
@@ -77,5 +80,5 @@ mkcert's root CA, `rootCA.pem` from the directory `mkcert -CAROOT` prints.
    the receiver's. If nearly every frame decodes, raise packets per code or
    codes per second for throughput.
 
-DONE always goes back by sound, so keep both phones' volume up even when sending
-by QR only.
+DONE and acks always go back by sound, so keep both phones' volume up even when
+sending by QR.

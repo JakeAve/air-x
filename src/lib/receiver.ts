@@ -1,4 +1,4 @@
-import { type Packet, PacketType } from "./packet.ts";
+import { type Packet, PacketType, type Run } from "./packet.ts";
 import { Decoder } from "./fountain/decoder.ts";
 
 export interface TransferProgress {
@@ -7,6 +7,8 @@ export interface TransferProgress {
   resolved: number;
   /** Lazy: see `Decoder.states`. */
   states: () => Uint8Array;
+  /** Lazy: see `Decoder.missingRuns`. */
+  missing: (maxRuns: number) => Run[];
 }
 
 export interface Completed {
@@ -34,7 +36,9 @@ export class Receiver {
   }
 
   push(packet: Packet, now: number): Completed | undefined {
-    if (packet.type === PacketType.Done) return undefined;
+    if (packet.type === PacketType.Done || packet.type === PacketType.Ack) {
+      return undefined;
+    }
 
     this.#evictStale(now);
 
@@ -76,6 +80,7 @@ export class Receiver {
       k: entry.decoder.k!,
       resolved: entry.decoder.resolved,
       states: () => entry.decoder.states(),
+      missing: (maxRuns) => entry.decoder.missingRuns(maxRuns),
     }));
   }
 

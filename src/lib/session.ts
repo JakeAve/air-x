@@ -2,8 +2,16 @@ import { anySignal, sleep } from "./abort.ts";
 import { BundleError, decodeBundle, type Item } from "./bundle.ts";
 import type { PacketChannel, PacketDisplay, PacketSource } from "./channel.ts";
 import { Encoder } from "./fountain/encoder.ts";
-import { decodePacket, encodePacket, PacketType } from "./packet.ts";
-import { DATA_BYTES } from "./protocol.ts";
+import {
+  decodeAck,
+  decodePacket,
+  encodeAck,
+  encodePacket,
+  type Packet,
+  PacketType,
+  type Run,
+} from "./packet.ts";
+import { ACK_RUNS, DATA_BYTES } from "./protocol.ts";
 import { type Completed, Receiver, type TransferProgress } from "./receiver.ts";
 
 export interface SendProgress {
@@ -15,6 +23,8 @@ export interface SendProgress {
   /** The batch that just went out. */
   via: "sound" | "qr";
   symbolIds: number[];
+  /** Blocks queued for resend from acks so far. */
+  acked: number;
 }
 
 export interface SoundSend {
@@ -30,8 +40,9 @@ export interface QrSend {
 }
 
 export interface SendOptions {
-  /** Where DONE is heard. */
+  /** Where DONE and acks are heard. */
   listen: PacketSource;
+  /** Exactly one of `sound` and `qr`. */
   sound?: SoundSend;
   qr?: QrSend;
   signal: AbortSignal;
@@ -44,14 +55,19 @@ export async function sendBundle(
 ): Promise<"done" | "stopped"> {
   const { listen, sound, qr, signal, onProgress } = options;
   if (!sound && !qr) throw new RangeError("sendBundle needs sound or qr");
+  if (sound && qr) {
+    throw new RangeError("sendBundle takes sound or qr, not both");
+  }
   const transferId = crypto.getRandomValues(new Uint16Array(1))[0];
   const encoder = new Encoder(bundle, transferId);
   const heardDone = new AbortController();
-  const failed = new AbortController();
-  const stop = anySignal(signal, heardDone.signal, failed.signal);
+  const stop = anySignal(signal, heardDone.signal);
   let soundSent = 0;
   let qrSent = 0;
   let codes = 0;
+  let acked = 0;
+  const wanted: number[] = [];
+  const queued = new Set<number>();
   const progress = (via: "sound" | "qr", symbolIds: number[]) =>
     onProgress?.({
       transferId,
@@ -61,60 +77,59 @@ export async function sendBundle(
       codes,
       via,
       symbolIds,
+      acked,
     });
 
-  const loop = async (body: () => Promise<void>, cleanup?: () => void) => {
-    try {
-      while (!stop.aborted) await body();
-    } catch (err) {
-      if (!stop.aborted) {
-        failed.abort();
-        throw err;
-      }
-    } finally {
-      cleanup?.();
-    }
-  };
+  /** Queued blocks first, then fresh symbols; the last packet gets `lastType`. */
+  const batch = (count: number, lastType: PacketType): Packet[] =>
+    Array.from({ length: count }, (_, i) => {
+      const type = i === count - 1 ? lastType : PacketType.Data;
+      const id = wanted.shift();
+      if (id === undefined) return encoder.next(type);
+      queued.delete(id);
+      return encoder.symbol(id, type);
+    });
 
   const unsubscribe = listen.onPacket((bytes) => {
     if (stop.aborted) return;
     const packet = decodePacket(bytes);
-    if (packet?.type === PacketType.Done && packet.transferId === transferId) {
-      heardDone.abort();
+    if (packet?.transferId !== transferId) return;
+    if (packet.type === PacketType.Done) heardDone.abort();
+    if (packet.type !== PacketType.Ack) return;
+    for (const { start, length } of decodeAck(packet.data)) {
+      for (let id = start; id < start + length && id < encoder.k; id++) {
+        if (queued.has(id)) continue;
+        queued.add(id);
+        wanted.push(id);
+        acked++;
+      }
     }
   });
 
   try {
-    await Promise.all([
-      sound && loop(async () => {
+    while (!stop.aborted) {
+      if (sound) {
         const { channel, listenEvery, windowMs } = sound;
-        const symbols = Array.from(
-          { length: listenEvery },
-          (_, i) =>
-            encoder.next(
-              i === listenEvery - 1 ? PacketType.DataListen : PacketType.Data,
-            ),
-        );
+        const symbols = batch(listenEvery, PacketType.DataListen);
         await channel.send(symbols.map(encodePacket), stop);
-        if (stop.aborted) return;
+        if (stop.aborted) break;
         soundSent += symbols.length;
         progress("sound", symbols.map((s) => s.symbolId));
         await sleep(windowMs, stop);
-      }),
-      qr && loop(async () => {
-        const symbols = Array.from(
-          { length: qr.packetsPerCode },
-          () => encoder.next(PacketType.Data),
-        );
+      } else if (qr) {
+        const symbols = batch(qr.packetsPerCode, PacketType.Data);
         qr.display.show(symbols.map(encodePacket));
         qrSent += symbols.length;
         codes++;
         progress("qr", symbols.map((s) => s.symbolId));
         await sleep(1000 / qr.fps, stop);
-      }, () => qr.display.clear()),
-    ]);
+      }
+    }
+  } catch (err) {
+    if (!stop.aborted) throw err;
   } finally {
     unsubscribe();
+    qr?.display.clear();
   }
   return heardDone.signal.aborted ? "done" : "stopped";
 }
@@ -125,6 +140,8 @@ export interface ReceiveProgress {
   sourceHeard: number;
   sourceNew: number;
   rejected: number;
+  /** Acks sent. */
+  acked: number;
   transfers: TransferProgress[];
 }
 
@@ -138,12 +155,21 @@ export interface ReceiveOptions {
   sound: PacketChannel;
   sources?: PacketSource[];
   silenceMs: number;
-  /** Wait before each DONE, so it lands after the sender's microphone is rolling again. */
+  /** Wait before each DONE or ack, so it lands after the sender's microphone is rolling again. */
   turnaroundMs?: number;
+  /**
+   * Ack the missing blocks once the new repair symbols heard since the first
+   * pass ended, or since the last ack, reach this many times the missing block
+   * count; undefined never acks. Dense repair (k <= DENSE_MAX_K) completes in
+   * about missing + 2 symbols, so a ratio of 2 never fires there, only where LT
+   * repair costs several times the missing count.
+   */
+  ackAfterRepair?: number;
   signal: AbortSignal;
   onProgress?: (p: ReceiveProgress) => void;
   onComplete?: (r: Received) => void;
   onDone?: (transferId: number) => void;
+  onAck?: (transferId: number, runs: Run[]) => void;
 }
 
 export function receiveBundle(
@@ -154,10 +180,12 @@ export function receiveBundle(
     sources = [],
     silenceMs,
     turnaroundMs = 0,
+    ackAfterRepair,
     signal,
     onProgress,
     onComplete,
     onDone,
+    onAck,
   } = options;
 
   return new Promise((resolve, reject) => {
@@ -166,6 +194,7 @@ export function receiveBundle(
     let sourceHeard = 0;
     let sourceNew = 0;
     let rejected = 0;
+    let acked = 0;
     const seenSymbols = new Set<number>();
     let received: Received | undefined;
     let doneSent = false;
@@ -175,6 +204,12 @@ export function receiveBundle(
     let timer: ReturnType<typeof setTimeout> | undefined;
     let completions = Promise.resolve();
     const lastSound = new Map<number, number>();
+    /** New repair symbols (id at or past k) heard per transfer since the first pass ended or the last ack. */
+    const repairHeard = new Map<number, number>();
+    /** Transfer whose ack waits for the next DataListen. */
+    let ackPending: number | undefined;
+    /** Completion's DONE-or-silence step, held while an ack is in flight. */
+    let afterAck: (() => void) | undefined;
 
     const armSilence = () => {
       if (finished || sending) return;
@@ -216,6 +251,57 @@ export function receiveBundle(
       armSilence();
     };
 
+    /** Ack now if the sender is not chirping, else at its next DataListen. */
+    const tryAck = (transferId: number) => {
+      if (finished || received) return;
+      const soundAt = lastSound.get(transferId);
+      if (soundAt === undefined || Date.now() - soundAt >= silenceMs) {
+        sendAck(transferId);
+      } else {
+        ackPending = transferId;
+      }
+    };
+
+    const sendAck = async (transferId: number) => {
+      if (finished || sending || received) return;
+      sending = true;
+      ackPending = undefined;
+      try {
+        if (turnaroundMs > 0) {
+          await sleep(turnaroundMs, signal);
+          if (finished || received) return;
+        }
+        const transfer = receiver.progress().find((t) =>
+          t.transferId === transferId
+        );
+        const runs = transfer?.missing(ACK_RUNS) ?? [];
+        if (!transfer || runs.length === 0) return;
+        await sound.send([
+          encodePacket({
+            type: PacketType.Ack,
+            transferId,
+            k: transfer.k,
+            symbolId: transfer.resolved,
+            data: encodeAck(runs),
+          }),
+        ], signal);
+        if (finished) return;
+        acked++;
+        repairHeard.set(transferId, 0);
+        onAck?.(transferId, runs);
+      } catch (err) {
+        if (!signal.aborted) finish(err);
+      } finally {
+        sending = false;
+        // A transfer that completed meanwhile had its DONE blocked by `sending`.
+        if (!finished) {
+          const next = afterAck;
+          afterAck = undefined;
+          if (next) next();
+        }
+      }
+    };
+
     const complete = async (completed: Completed, soundListen: boolean) => {
       if (received) return;
       let items: Item[];
@@ -231,13 +317,56 @@ export function receiveBundle(
       const soundAt = lastSound.get(completed.transferId);
       lastSound.clear();
       onComplete?.(received);
-      if (
+      const kick = () =>
         soundListen || soundAt === undefined ||
-        Date.now() - soundAt >= silenceMs
+          Date.now() - soundAt >= silenceMs
+          ? sendDone()
+          : armSilence();
+      if (sending) afterAck = kick;
+      else kick();
+    };
+
+    const hearSymbol = (packet: Packet, fromSound: boolean) => {
+      let isNew = false;
+      if (packet.type !== PacketType.Done) {
+        const key = packet.transferId * 2 ** 24 + packet.symbolId;
+        isNew = !seenSymbols.has(key);
+        seenSymbols.add(key);
+        if (!fromSound && isNew) sourceNew++;
+      }
+      const soundListen = fromSound && packet.type === PacketType.DataListen;
+      if (fromSound && !received && packet.type !== PacketType.Done) {
+        lastSound.set(packet.transferId, Date.now());
+      }
+      const completed = receiver.push(packet, Date.now());
+      if (completed) {
+        completions = completions
+          .then(() => complete(completed, soundListen))
+          .catch(finish);
+      } else if (
+        received?.transferId === packet.transferId &&
+        packet.type !== PacketType.Done
       ) {
-        sendDone();
-      } else {
-        armSilence();
+        if (doneSent) heardSinceDone = true;
+        if (soundListen) sendDone();
+        else if (fromSound) armSilence();
+      } else if (
+        ackAfterRepair !== undefined && !received &&
+        packet.type !== PacketType.Done
+      ) {
+        const { transferId } = packet;
+        if (isNew && packet.symbolId >= packet.k) {
+          const heard = (repairHeard.get(transferId) ?? 0) + 1;
+          repairHeard.set(transferId, heard);
+          const transfer = receiver.progress().find((t) =>
+            t.transferId === transferId
+          );
+          if (
+            transfer &&
+            heard >= ackAfterRepair * (transfer.k - transfer.resolved)
+          ) tryAck(transferId);
+        }
+        if (soundListen && ackPending === transferId) sendAck(transferId);
       }
     };
 
@@ -249,30 +378,8 @@ export function receiveBundle(
       } else {
         if (fromSound) soundHeard++;
         else sourceHeard++;
-        if (packet.type !== PacketType.Done) {
-          const key = packet.transferId * 2 ** 24 + packet.symbolId;
-          const isNew = !seenSymbols.has(key);
-          seenSymbols.add(key);
-          if (!fromSound && isNew) sourceNew++;
-        }
-        const soundListen = fromSound &&
-          packet.type === PacketType.DataListen;
-        if (fromSound && !received && packet.type !== PacketType.Done) {
-          lastSound.set(packet.transferId, Date.now());
-        }
-        const completed = receiver.push(packet, Date.now());
-        if (completed) {
-          completions = completions
-            .then(() => complete(completed, soundListen))
-            .catch(finish);
-        } else if (
-          received?.transferId === packet.transferId &&
-          packet.type !== PacketType.Done
-        ) {
-          if (doneSent) heardSinceDone = true;
-          if (soundListen) sendDone();
-          else if (fromSound) armSilence();
-        }
+        // Another receiver's ack is neither a symbol nor sound from the sender.
+        if (packet.type !== PacketType.Ack) hearSymbol(packet, fromSound);
       }
       onProgress?.({
         heard: soundHeard + sourceHeard,
@@ -280,6 +387,7 @@ export function receiveBundle(
         sourceHeard,
         sourceNew,
         rejected,
+        acked,
         transfers: receiver.progress(),
       });
     };

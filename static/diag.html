@@ -64,7 +64,6 @@
             <legend>Send by</legend>
             <label><input type="radio" name="send-by" value="qr" checked /> QR code</label>
             <label><input type="radio" name="send-by" value="sound" /> sound</label>
-            <label><input type="radio" name="send-by" value="both" /> both</label>
           </fieldset>
           <p id="send-estimate" class="muted">Nothing to send yet</p>
           <hr />
@@ -146,6 +145,9 @@
                 <input id="turnaround-ms" type="number" inputmode="numeric" min="0" step="50" />
               </label>
             </div>
+            <label>Ack after repair × missing
+              <input id="ack-after-repair" type="number" inputmode="decimal" min="0" step="0.5" value="2" />
+            </label>
           </details>
         </div>
         <div id="receive-run" class="stack" hidden>

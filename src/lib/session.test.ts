@@ -3,6 +3,7 @@ import { sleep } from "./abort.ts";
 import { encodeBundle, type Item } from "./bundle.ts";
 import type { PacketChannel, PacketDisplay, PacketSource } from "./channel.ts";
 import { Encoder } from "./fountain/encoder.ts";
+import { DENSE_MAX_K } from "./protocol.ts";
 import {
   decodePacket,
   encodeAck,
@@ -498,7 +499,7 @@ Deno.test("a QR receiver acks the blocks of dropped codes and the sender resends
     sound: air.party(),
     sources: [display],
     silenceMs: 60_000,
-    ackAfterRepair: 0.5,
+    ackEvery: 4,
     signal: stopReceiver.signal,
     onAck: (_, runs) => acks.push(runs),
   });
@@ -528,7 +529,42 @@ Deno.test("a QR receiver acks the blocks of dropped codes and the sender resends
   assert(last!.qrSent < last!.k + 2 * packetsPerCode + 8);
 });
 
-Deno.test("dense repair finishes before a budget of 2x missing, so no ack goes out", async () => {
+Deno.test("an LT-sized QR transfer with many dropped codes finishes in few symbols past k thanks to periodic acks", async () => {
+  const items = testItems(26_000);
+  const bundle = await encodeBundle(items);
+  const air = new Air({ seed: 21 });
+  const packetsPerCode = 4;
+  const dropCodes = Array.from({ length: 10 }, (_, i) => 3 + i * 9);
+  const display = new Display({ seed: 21, dropCodes });
+  const stopReceiver = new AbortController();
+  let acks = 0;
+  let last: SendProgress | undefined;
+
+  const received = receiveBundle({
+    sound: air.party(),
+    sources: [display],
+    silenceMs: 60_000,
+    ackEvery: 16,
+    signal: stopReceiver.signal,
+    onAck: () => acks++,
+  });
+  const sent = await sendBundle(bundle, {
+    listen: air.party(),
+    qr: { display, packetsPerCode, fps: 50 },
+    signal: new AbortController().signal,
+    onProgress: (p) => last = p,
+  });
+
+  assertEquals(sent, "done");
+  stopReceiver.abort();
+  assertEquals((await received)?.items, items);
+  assert(last!.k > DENSE_MAX_K, `k ${last!.k}`);
+  assert(acks >= 1);
+  // 40 blocks were dropped; LT repair alone needs a few hundred symbols here.
+  assert(last!.qrSent < last!.k + 100, `${last!.qrSent} of k ${last!.k}`);
+});
+
+Deno.test("dense repair finishes inside the ack period, so no ack goes out", async () => {
   const items = testItems(2_000);
   const bundle = await encodeBundle(items);
   const air = new Air({ seed: 13 });
@@ -540,7 +576,7 @@ Deno.test("dense repair finishes before a budget of 2x missing, so no ack goes o
     sound: air.party(),
     sources: [display],
     silenceMs: 60_000,
-    ackAfterRepair: 2,
+    ackEvery: 160,
     signal: stopReceiver.signal,
     onProgress: (p) => last = p,
   });
@@ -560,7 +596,7 @@ Deno.test("a QR transfer that completes during an ack's turnaround still gets DO
   const items = testItems(2_000);
   const bundle = await encodeBundle(items);
   const air = new Air({ seed: 15 });
-  // Codes land every 10 ms: the first past-k code meets the budget and starts
+  // Codes land every 10 ms: the first past-k code fills the period and starts
   // the ack, and the next codes complete the transfer inside the 30 ms
   // turnaround sleep.
   const display = new Display({ seed: 15, dropCodes: [3] });
@@ -573,7 +609,7 @@ Deno.test("a QR transfer that completes during an ack's turnaround still gets DO
     sources: [display],
     silenceMs: 60_000,
     turnaroundMs: 30,
-    ackAfterRepair: 0.25,
+    ackEvery: 1,
     signal: stopReceiver.signal,
   });
   const sent = await sendBundle(bundle, {
@@ -588,7 +624,7 @@ Deno.test("a QR transfer that completes during an ack's turnaround still gets DO
   assertEquals((await received)?.items, items);
 });
 
-Deno.test("a sound receiver acks once repair costs a quarter of the missing count and completes", async () => {
+Deno.test("a sound receiver acks on the period and completes", async () => {
   const items = testItems(4_000);
   const bundle = await encodeBundle(items);
   const air = new Air({ seed: 14, loss: 0.2 });
@@ -597,7 +633,7 @@ Deno.test("a sound receiver acks once repair costs a quarter of the missing coun
   const received = receiveBundle({
     sound: air.party(),
     silenceMs: SILENCE_MS,
-    ackAfterRepair: 0.25,
+    ackEvery: 4,
     signal: new AbortController().signal,
     onProgress: (p) => last = p,
   });
@@ -611,7 +647,7 @@ Deno.test("a sound receiver acks once repair costs a quarter of the missing coun
   assert(last!.acked >= 1);
 });
 
-Deno.test("without ackAfterRepair a receiver never acks", async () => {
+Deno.test("without ackEvery a receiver never acks", async () => {
   const items = testItems(4_000);
   const bundle = await encodeBundle(items);
   const air = new Air({ seed: 14, loss: 0.2 });

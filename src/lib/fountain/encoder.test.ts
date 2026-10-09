@@ -1,6 +1,7 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import { encodePacket, PacketType } from "../packet.ts";
 import {
+  COMPACT_MAX_SYMBOL_ID,
   dataBytes,
   MAX_BUNDLE_BYTES,
   MAX_SYMBOL_ID,
@@ -75,11 +76,29 @@ Deno.test("an empty bundle is one zero block", () => {
   assertEquals(encoder.next().data, new Uint8Array(DATA_BYTES));
 });
 
-Deno.test("next throws past MAX_SYMBOL_ID", () => {
-  const encoder = new Encoder(new Uint8Array(1), 1, SOUND_PACKET_BYTES);
-  (encoder as unknown as { nextSymbolId: number }).nextSymbolId = MAX_SYMBOL_ID;
-  assertEquals(encoder.next().symbolId, MAX_SYMBOL_ID);
-  assertThrows(() => encoder.next(), RangeError);
+Deno.test("next throws past the transfer's highest symbol id", () => {
+  for (
+    const [bytes, max] of [[1, COMPACT_MAX_SYMBOL_ID], [
+      256 * DATA_BYTES,
+      MAX_SYMBOL_ID,
+    ]]
+  ) {
+    const encoder = new Encoder(new Uint8Array(bytes), 1, SOUND_PACKET_BYTES);
+    (encoder as unknown as { nextSymbolId: number }).nextSymbolId = max;
+    assertEquals(encoder.next().symbolId, max);
+    assertThrows(() => encoder.next(), RangeError);
+  }
+});
+
+Deno.test("a 56-byte bundle is one sound packet, a 57-byte bundle is two", () => {
+  const one = new Encoder(new Uint8Array(56), 1, SOUND_PACKET_BYTES);
+  assertEquals([one.k, one.dataBytes], [1, 56]);
+  assertEquals(encodePacket(one.next()).length, SOUND_PACKET_BYTES);
+  const two = new Encoder(new Uint8Array(57), 1, SOUND_PACKET_BYTES);
+  assertEquals([two.k, two.dataBytes], [2, 56]);
+  const wide = new Encoder(new Uint8Array(255 * 56 + 1), 1, SOUND_PACKET_BYTES);
+  assertEquals([wide.k, wide.dataBytes], [270, 53]);
+  assertEquals(encodePacket(wide.next()).length, SOUND_PACKET_BYTES);
 });
 
 Deno.test("symbol hands out any id without moving next", () => {
@@ -106,8 +125,11 @@ Deno.test("symbol hands out any id without moving next", () => {
 
 Deno.test("symbol throws on an id out of range", () => {
   const encoder = new Encoder(new Uint8Array(1), 1, SOUND_PACKET_BYTES);
-  assertEquals(encoder.symbol(MAX_SYMBOL_ID).symbolId, MAX_SYMBOL_ID);
-  for (const id of [MAX_SYMBOL_ID + 1, -1, 1.5, NaN]) {
+  assertEquals(
+    encoder.symbol(COMPACT_MAX_SYMBOL_ID).symbolId,
+    COMPACT_MAX_SYMBOL_ID,
+  );
+  for (const id of [COMPACT_MAX_SYMBOL_ID + 1, -1, 1.5, NaN]) {
     assertThrows(() => encoder.symbol(id), RangeError);
   }
 });

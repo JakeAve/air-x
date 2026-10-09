@@ -10,6 +10,10 @@ Deno.test("blockCount rounds up and is at least 1", () => {
   assertEquals(blockCount(DATA_BYTES, SOUND_PACKET_BYTES), 1);
   assertEquals(blockCount(DATA_BYTES + 1, SOUND_PACKET_BYTES), 2);
   assertEquals(blockCount(10 * DATA_BYTES, SOUND_PACKET_BYTES), 10);
+  // Past 255 compact blocks the wide header's smaller data size counts.
+  assertEquals(blockCount(255 * DATA_BYTES, SOUND_PACKET_BYTES), 255);
+  assertEquals(blockCount(255 * DATA_BYTES + 1, SOUND_PACKET_BYTES), 270);
+  assertEquals(blockCount(255 * 120 + 1, 128), 262);
 });
 
 Deno.test("source symbols are their own block", () => {

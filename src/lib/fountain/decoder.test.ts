@@ -215,7 +215,7 @@ Deno.test("states: unseen, pending, then resolved per block", () => {
 
 function systematic(k: number): Packet[] {
   const encoder = new Encoder(
-    new Uint8Array(k * DATA_BYTES).fill(7),
+    new Uint8Array(k * dataBytes(SOUND_PACKET_BYTES, k)).fill(7),
     5,
     SOUND_PACKET_BYTES,
   );
@@ -252,11 +252,11 @@ Deno.test("an Ack packet is ignored by the decoder", () => {
 
 Deno.test("decodes a transfer of 128-byte packets", () => {
   const random = seededRandom(900);
-  const bundle = randomBytes(random, 10 * 117 - 7);
+  const bundle = randomBytes(random, 10 * 120 - 7);
   const encoder = new Encoder(bundle, 15, 128);
-  assertEquals(encoder.dataBytes, 117);
+  assertEquals(encoder.dataBytes, 120);
   const packets = lossy(stream(encoder, 50), random, 0.2);
-  const out = new Uint8Array(10 * 117);
+  const out = new Uint8Array(10 * 120);
   out.set(bundle);
   assertEquals(feed(new Decoder(), packets), out);
 });

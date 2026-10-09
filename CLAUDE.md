@@ -87,10 +87,13 @@ fresh port is a clean origin. README, "Testing on phones", has the rest.
 The protocol layer. Spec: `docs/specs/2026-09-14-transfer-protocol.md` (local,
 gitignored).
 
-- `protocol.ts` — wire constants: version, packet sizes, `MAX_K`, and
+- `protocol.ts` — wire constants: version, packet sizes, `MAX_K`,
+  `COMPACT_MAX_K`, `dataBytes(packetBytes, k)` (a transfer's block size), and
   `PACKET_SECONDS` per sound protocol.
 - `crc16.ts` — CRC-16/CCITT-FALSE over the packet.
-- `packet.ts` — 64-byte packet codec; rejects bad CRC, version, or type.
+- `packet.ts` — codec for 64- or 128-byte packets, compact or wide header by
+  `k`; rejects bad CRC, version, or type, and a wide packet whose `k` fits the
+  compact header.
 - `bundle.ts` — items to one byte string: deflate-raw against `DICTIONARY` plus
   truncated SHA-256. Inflates in 4 KB steps of input so the 64 MiB cap trips
   before a bomb allocates.
@@ -148,11 +151,15 @@ gitignored).
 
 Wire facts (multi-byte fields big-endian):
 
-- Packet, 64 bytes:
-  `version 4b | type 4b | transferId 16b | k 24b | symbolId 24b | data 53B | crc16`.
-  Types: `Data`, `DataListen`, `Done`, `Ack` (`symbolId` is the highest id
-  heard; data is 12 runs of `start u24 | length u8`, then fresh symbols heard as
-  a u24).
+- Packet, 64 bytes by sound: first byte `version 4b | wide 1b | type 3b`, then
+  compact `transferId u16 | k u8 | symbolId u16 | data 56B | crc16` or wide
+  `transferId u16 | k u24 | symbolId u24 | data 53B | crc16`. A packet is wide
+  exactly when `k > COMPACT_MAX_K` (255), so `Done` (k 0) is compact and an
+  `Ack` uses its transfer's layout. `blockCount` takes the count at the compact
+  data size if that is at most 255, else the count at the wide size. A compact
+  transfer's symbol ids stop at 65535. Types: `Data`, `DataListen`, `Done`,
+  `Ack` (`symbolId` is the highest id heard; data is 12 runs of
+  `start u24 | length u8`, then fresh symbols heard as a u24).
 - Bundle:
   `u32 length | deflate-raw(u32 manifestLength | manifest JSON | item bytes...) | sha256[0..8]`.
   `length` counts compressed bytes plus hash, so block padding past it is

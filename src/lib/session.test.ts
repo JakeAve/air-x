@@ -521,7 +521,7 @@ Deno.test("a QR receiver acks the blocks of dropped codes and the sender resends
   stopReceiver.abort();
   assertEquals((await received)?.items, items);
   assert(last);
-  assertEquals(last!.k, 41);
+  assertEquals(last!.k, 38);
   assert(acks.length >= 1);
   // Acks before the first repair symbol name no blocks. A repair symbol may
   // peel a dropped block by luck before the ack, so the first ack with runs

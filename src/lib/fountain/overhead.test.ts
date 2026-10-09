@@ -1,7 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
 import { dataBytes, DENSE_MAX_K, SOUND_PACKET_BYTES } from "../protocol.ts";
-
-const DATA_BYTES = dataBytes(SOUND_PACKET_BYTES, 0);
 import { Decoder } from "./decoder.ts";
 import { Encoder } from "./encoder.ts";
 
@@ -33,9 +31,8 @@ for (const { k, trials, meanBound, worst } of cases) {
         const random = seededRandom(k * 1000 + loss * 100 + join);
         let total = 0;
         for (let trial = 0; trial < trials; trial++) {
-          const bundle = new Uint8Array(k * DATA_BYTES).map(() =>
-            random() * 256
-          );
+          const bundle = new Uint8Array(k * dataBytes(SOUND_PACKET_BYTES, k))
+            .map(() => random() * 256);
           const encoder = new Encoder(bundle, trial, SOUND_PACKET_BYTES);
           for (let i = 0; i < join; i++) encoder.next();
           const decoder = new Decoder();

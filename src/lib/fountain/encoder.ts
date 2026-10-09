@@ -1,5 +1,11 @@
 import { type Packet, PacketType } from "../packet.ts";
-import { dataBytes, MAX_BUNDLE_BYTES, MAX_SYMBOL_ID } from "../protocol.ts";
+import {
+  COMPACT_MAX_K,
+  COMPACT_MAX_SYMBOL_ID,
+  dataBytes,
+  MAX_BUNDLE_BYTES,
+  MAX_SYMBOL_ID,
+} from "../protocol.ts";
 import { blockCount, blockSet } from "./symbols.ts";
 
 export class Encoder {
@@ -29,11 +35,10 @@ export class Encoder {
   }
 
   symbol(symbolId: number, type: PacketType = PacketType.Data): Packet {
-    if (
-      !Number.isInteger(symbolId) || symbolId < 0 || symbolId > MAX_SYMBOL_ID
-    ) {
+    const max = this.k <= COMPACT_MAX_K ? COMPACT_MAX_SYMBOL_ID : MAX_SYMBOL_ID;
+    if (!Number.isInteger(symbolId) || symbolId < 0 || symbolId > max) {
       throw new RangeError(
-        `symbol id ${symbolId} is not an integer in 0..${MAX_SYMBOL_ID}`,
+        `symbol id ${symbolId} is not an integer in 0..${max}`,
       );
     }
     const data = new Uint8Array(this.dataBytes);

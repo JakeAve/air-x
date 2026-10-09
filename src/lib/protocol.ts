@@ -1,16 +1,25 @@
 import type { SoundProtocol } from "./sound/ggwave.ts";
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
-/** Packet layout: version 4b | type 4b | transferId 16b | k 24b | symbolId 24b | data | crc16. */
+/**
+ * Packet layout: version 4b | wide 1b | type 3b, then
+ * compact: transferId 16b | k 8b | symbolId 16b | data | crc16, or
+ * wide: transferId 16b | k 24b | symbolId 24b | data | crc16.
+ * A packet is wide exactly when its k is above COMPACT_MAX_K.
+ */
 export const SOUND_PACKET_BYTES = 64;
 export const QR_PACKET_BYTES = 64;
 export const PACKET_HEADER_BYTES = 9;
+export const COMPACT_HEADER_BYTES = 6;
 export const PACKET_CRC_BYTES = 2;
 
 /** Data bytes in a packet of `packetBytes` for a transfer of `k` blocks. */
-export function dataBytes(packetBytes: number, _k: number): number {
-  return packetBytes - PACKET_HEADER_BYTES - PACKET_CRC_BYTES;
+export function dataBytes(packetBytes: number, k: number): number {
+  const header = k <= COMPACT_MAX_K
+    ? COMPACT_HEADER_BYTES
+    : PACKET_HEADER_BYTES;
+  return packetBytes - header - PACKET_CRC_BYTES;
 }
 
 /** Up to this many blocks, repair symbols are dense random rows instead of LT. */
@@ -23,6 +32,10 @@ export const ACK_MAX_RUN = 255;
 
 export const MAX_K = 2 ** 24 - 1;
 export const MAX_SYMBOL_ID = 2 ** 24 - 1;
+
+/** A transfer of at most this many blocks uses the compact header. */
+export const COMPACT_MAX_K = 255;
+export const COMPACT_MAX_SYMBOL_ID = 65535;
 
 /** A decoder ignores any packet whose k implies a bundle bigger than this. */
 export const MAX_BUNDLE_BYTES = 16 * 1024 * 1024;

@@ -57,6 +57,10 @@ self.addEventListener("activate", (event) => {
 
 async function handle(req: Request, info: Deno.ServeHandlerInfo) {
   const { pathname } = new URL(req.url);
+  if (pathname !== LOG_PATH) {
+    const from = (info.remoteAddr as Deno.NetAddr).hostname;
+    console.log(`[${from}] ${req.method} ${pathname}`);
+  }
   if (pathname === LOG_PATH && req.method === "POST") {
     const from = (info.remoteAddr as Deno.NetAddr).hostname;
     const text = (await req.text()).slice(0, LOG_MAX_CHARS);

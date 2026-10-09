@@ -17,7 +17,8 @@ already lives in `static/styles.css`; extend it, do not fork it.
 | `--ink`                  | `#ffffff`           | text, outline buttons, radio ring when checked                                               |
 | `--surface`              | `#141414`           | input fills, item cards, unlit grid tiles                                                    |
 | `--surface-2`            | `#1a1a1a`           | camera preview                                                                               |
-| `--hairline`             | `#2a2a2a`           | 1px dividers (`<hr>`), card and preview edges                                                |
+| `--scrim`                | black at 55%        | bands behind the UI laid over the camera                                                     |
+| `--hairline`             | `#2a2a2a`           | 1px dividers (`<hr>`), card edges                                                            |
 | `--border`               | `#4d4d4d`           | 2px input borders at rest, unchecked radio ring, switch track off                            |
 | `--muted`                | `#9a9a9a`           | secondary text, estimates, elapsed time                                                      |
 | `--label`                | `#c2c2c2`           | field labels, lede, item meta                                                                |
@@ -98,13 +99,15 @@ inside a `.stack` sit 1rem apart; label to control is 0.5rem; two-up `.row` and
   (sent by sound). A tile that lands swings in from its left edge
   (`@keyframes land`, the WP7 turnstile, off under reduced motion). On the
   receive screen the grid sits in a `.stage` after the `.preview`; while the
-  camera is open its box is the preview itself: it covers the video edge to edge
-  with `--b1` gaps, tiles stretch to the video's shape, unlit ones are a 35%
-  black scrim (`--unlit`) and resolved ones 70% mango, so the picture reads
-  through. Then a `.progress` row: `.count` (1.5rem light) left, muted timing
-  right. One line each; the log holds the detail.
-- **Hairlines**: `<hr>` between groups on a form screen. Cards (`.items li`,
-  `.preview`) get a `--b1` `--hairline` edge on `--surface` or `--surface-2`.
+  camera is open the stage is fixed to the viewport, the video fills it
+  (`object-fit: cover`), and the grid covers the video edge to edge with `--b1`
+  gaps: unlit tiles are a 35% black scrim (`--unlit`) and resolved ones 70%
+  mango, so the picture reads through. The screen lies over it: strip and title
+  on a `--scrim` band at the top, controls and log on one at the bottom, the
+  middle clear for aiming. Then a `.progress` row: `.count` (1.5rem light) left,
+  muted timing right. One line each; the log holds the detail.
+- **Hairlines**: `<hr>` between groups on a form screen. Cards (`.items li`) get
+  a `--b1` `--hairline` edge on `--surface`.
 
 ## Screens
 

@@ -484,7 +484,14 @@ main[data-screen="home"] .log {
   color: var(--label);
 }
 
+/* A long file name wraps instead of pushing Download off the card. */
+.items .meta span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .items a {
+  flex: none;
   font-weight: 600;
 }
 
@@ -512,8 +519,14 @@ pre {
   image-rendering: pixelated;
 }
 
+/* With the camera open the video fills the viewport behind the page and the
+   receive screen lies on top: a `--scrim` band under the title, the grid
+   below it with translucent tiles so the picture reads through, and another
+   band under the controls. */
 .preview {
-  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: -2; /* under the bands */
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -524,15 +537,12 @@ pre {
   transform: scaleX(-1);
 }
 
-/* With the camera open the video fills the viewport behind the page, the
-   grid covers it (square tiles, each 80% of its slot, `--cell` set by JS,
-   translucent so the picture reads through), and the receive screen lies on
-   top: a `--scrim` band under the title, another under the controls, the
-   middle left clear for aiming. */
-.stage:has(> .preview:not([hidden])) {
-  position: fixed;
-  inset: 0;
-  z-index: -2; /* under the bands */
+.preview:not([hidden]) + .grid {
+  --unlit: rgba(0, 0, 0, 0.35);
+}
+
+.preview:not([hidden]) + .grid i[data-s="2"] {
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
 }
 
 main:has(.preview:not([hidden])) {
@@ -543,31 +553,43 @@ main:has(.preview:not([hidden])) {
 }
 
 main:has(.preview:not([hidden])) #screen-receive {
-  grid-template-rows: auto auto 1fr auto auto;
-}
-
-/* One column, placed by hand: the bands share cells with the content. */
-main:has(.preview:not([hidden])) #screen-receive > * {
-  grid-column: 1;
-}
-
-main:has(.preview:not([hidden])) .strip {
-  grid-row: 1;
-}
-
-main:has(.preview:not([hidden])) h1 {
-  grid-row: 2;
+  grid-template-rows: auto auto 1fr auto;
 }
 
 main:has(.preview:not([hidden])) #receive-run {
+  grid-row: 3;
+  grid-template-rows: 1fr;
+  gap: 0;
+}
+
+/* One column, placed by hand: the bands share cells with the content. */
+main:has(.preview:not([hidden])) :is(#screen-receive, #receive-run) > * {
+  grid-column: 1;
+}
+
+main:has(.preview:not([hidden])) .strip,
+main:has(.preview:not([hidden])) .stage {
+  grid-row: 1;
+}
+
+main:has(.preview:not([hidden])) h1,
+main:has(.preview:not([hidden])) #flip {
+  grid-row: 2;
+}
+
+main:has(.preview:not([hidden])) .progress {
+  grid-row: 3;
+}
+
+main:has(.preview:not([hidden])) :is(#listen, .items) {
   grid-row: 4;
 }
 
-main:has(.preview:not([hidden])) #listen {
-  grid-row: 5;
+main:has(.preview:not([hidden])) #receive-run > :not(.stage) {
+  margin-top: 1rem;
 }
 
-main:has(.preview:not([hidden])) #screen-receive::before,
+main:has(.preview:not([hidden])) :is(#screen-receive, #receive-run)::before,
 main:has(.preview:not([hidden])) #screen-receive::after {
   content: "";
   grid-column: 1;
@@ -577,33 +599,23 @@ main:has(.preview:not([hidden])) #screen-receive::after {
 
 main:has(.preview:not([hidden])) #screen-receive::before {
   grid-row: 1 / 3;
-  margin: calc(-1 * var(--gap)) calc(-1 * var(--bleed)) -1rem;
+  margin: calc(-1 * var(--gap)) calc(-1 * var(--bleed)) -0.75rem;
+}
+
+main:has(.preview:not([hidden])) #receive-run::before {
+  grid-row: 2 / 5;
+  margin: 0 calc(-1 * var(--bleed)) calc(-1 * var(--gap));
 }
 
 main:has(.preview:not([hidden])) #screen-receive::after {
-  grid-row: 4 / 6;
-  margin: -1rem calc(-1 * var(--bleed)) 0;
+  grid-row: 4;
+  margin: 0 calc(-1 * var(--bleed));
 }
 
 main:has(.preview:not([hidden])) .log {
   margin: 0 calc(-1 * var(--bleed)) -2rem;
   padding: var(--gap) var(--bleed) 2rem;
   background: var(--scrim);
-}
-
-.preview:not([hidden]) + .grid {
-  --unlit: rgba(0, 0, 0, 0.35);
-  position: absolute;
-  inset: 0;
-  grid-template-columns: repeat(var(--cols), var(--cell));
-  grid-auto-rows: var(--cell);
-  justify-content: space-evenly;
-  align-content: space-evenly;
-  gap: 0;
-}
-
-.preview:not([hidden]) + .grid i[data-s="2"] {
-  background: color-mix(in srgb, var(--accent) 70%, transparent);
 }
 
 [hidden] {

@@ -99,13 +99,12 @@ inside a `.stack` sit 1rem apart; label to control is 0.5rem; two-up `.row` and
   (sent by sound). A tile that lands swings in from its left edge
   (`@keyframes land`, the WP7 turnstile, off under reduced motion). On the
   receive screen the grid sits in a `.stage` after the `.preview`; while the
-  camera is open the stage is fixed to the viewport, the video fills it
-  (`object-fit: cover`), and the grid covers the video edge to edge with `--b1`
-  gaps: unlit tiles are a 35% black scrim (`--unlit`) and resolved ones 70%
-  mango, so the picture reads through. The screen lies over it: strip and title
-  on a `--scrim` band at the top, controls and log on one at the bottom, the
-  middle clear for aiming. Then a `.progress` row: `.count` (1.5rem light) left,
-  muted timing right. One line each; the log holds the detail.
+  camera is open the video is fixed to the viewport (`object-fit: cover`) behind
+  the page and the grid stays in the page, starting under the title: unlit tiles
+  are a 35% black scrim (`--unlit`) and resolved ones 70% mango, so the picture
+  reads through. Strip and title sit on a `--scrim` band at the top, controls
+  and log on one at the bottom. Then a `.progress` row: `.count` (1.5rem light)
+  left, muted timing right. One line each; the log holds the detail.
 - **Hairlines**: `<hr>` between groups on a form screen. Cards (`.items li`) get
   a `--b1` `--hairline` edge on `--surface`.
 

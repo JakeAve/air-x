@@ -1,6 +1,10 @@
 // Serves dist/ locally and rebuilds when src/ or static/ change. Phones only
-// expose the microphone to secure origins, so when .certs/cert.pem and
-// .certs/key.pem exist (see README) the server speaks HTTPS.
+// expose the microphone to secure origins, so the server speaks HTTPS with a
+// certificate it makes itself with mkcert, for whatever addresses this machine
+// has right now. It lives in the main checkout's .certs/, shared by every
+// worktree, and is remade when the addresses change. Without mkcert and
+// without a certificate there, it falls back to http. CA_PATH serves mkcert's
+// root certificate so a phone can install it.
 //
 // A phone's log is out of reach, so every HTML page is served with
 // DEV_LOG_SCRIPT appended: it posts each new line of the page's #log, plus
@@ -11,13 +15,13 @@
 // origin would keep running an old build. /sw.js is served as DEV_SW instead:
 // it drops every cache, unregisters, and reloads pages that were cached.
 import { serveDir } from "@std/http";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import { build } from "./build.ts";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const DIST = join(ROOT, "dist");
 const PORT = Number(Deno.env.get("PORT") ?? 8444);
-const CERT_DIR = join(ROOT, ".certs");
+const CA_PATH = "/rootCA.pem";
 
 const LOG_PATH = "/__log";
 const LOG_MAX_CHARS = 16_384;
@@ -69,6 +73,11 @@ async function handle(req: Request, info: Deno.ServeHandlerInfo) {
     }
     return new Response(null, { status: 204 });
   }
+  if (pathname === CA_PATH && caRoot) {
+    return new Response(await Deno.readFile(join(caRoot, "rootCA.pem")), {
+      headers: { "content-type": "application/x-x509-ca-cert" },
+    });
+  }
   if (pathname === "/sw.js") {
     return new Response(DEV_SW, {
       headers: {
@@ -93,13 +102,58 @@ async function handle(req: Request, info: Deno.ServeHandlerInfo) {
   });
 }
 
+/** A command's trimmed stdout, or undefined if it is missing or fails. */
+async function run(cmd: string, args: string[]): Promise<string | undefined> {
+  try {
+    const { success, stdout } = await new Deno.Command(cmd, {
+      args,
+      stderr: "inherit",
+    }).output();
+    return success ? new TextDecoder().decode(stdout).trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** This machine's addresses on its networks, link-local ones aside. */
+const lanAddresses = Deno.networkInterfaces()
+  .filter((i) =>
+    i.family === "IPv4" && !i.address.startsWith("127.") &&
+    !i.address.startsWith("169.254.")
+  )
+  .map((i) => i.address);
+
+const caRoot = await run("mkcert", ["-CAROOT"]);
+
 async function tlsOptions(): Promise<
   { cert: string; key: string } | undefined
 > {
+  const gitDir = await run("git", [
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-common-dir",
+  ]);
+  const dir = join(gitDir ? dirname(gitDir) : ROOT, ".certs");
+  const [cert, key, hostsFile] = ["cert.pem", "key.pem", "hosts.txt"].map((f) =>
+    join(dir, f)
+  );
+  const hosts = ["localhost", "127.0.0.1", Deno.hostname(), ...lanAddresses];
+  const made = await Deno.readTextFile(hostsFile).catch(() => "");
+  if (caRoot && !hosts.every((h) => made.split("\n").includes(h))) {
+    await Deno.mkdir(dir, { recursive: true });
+    const ok = await run("mkcert", [
+      "-cert-file",
+      cert,
+      "-key-file",
+      key,
+      ...hosts,
+    ]);
+    if (ok !== undefined) await Deno.writeTextFile(hostsFile, hosts.join("\n"));
+  }
   try {
     return {
-      cert: await Deno.readTextFile(join(CERT_DIR, "cert.pem")),
-      key: await Deno.readTextFile(join(CERT_DIR, "key.pem")),
+      cert: await Deno.readTextFile(cert),
+      key: await Deno.readTextFile(key),
     };
   } catch {
     return undefined;
@@ -131,9 +185,22 @@ const server = Deno.serve(
   { port: PORT, hostname: "0.0.0.0", ...tls, onListen: () => {} },
   handle,
 );
-console.log(
-  `serving dist/ over ${tls ? "https" : "http"} on port ${server.addr.port}`,
-);
+const scheme = tls ? "https" : "http";
+const { port } = server.addr;
+console.log(`serving dist/ on this machine: ${scheme}://localhost:${port}`);
+for (const address of lanAddresses) {
+  console.log(`from a phone on this network: ${scheme}://${address}:${port}`);
+}
+if (!tls) {
+  console.log(
+    "no certificate, so phones will refuse the microphone and camera: install mkcert and restart (README)",
+  );
+} else if (caRoot) {
+  console.log(
+    `a device must trust mkcert's root certificate once (README): this machine by \`mkcert -install\`, a phone by installing ${CA_PATH} from the address above`,
+  );
+}
+console.log("each device's page log and errors print here");
 
 const watcher = Deno.watchFs([join(ROOT, "src"), join(ROOT, "static")]);
 for await (const _event of watcher) {

@@ -620,7 +620,7 @@ listenButton.addEventListener("click", async () => {
     receiveRun.hidden = !received;
     receiveForm.hidden = false;
     receiveTitle.textContent = received ? "received" : "receive";
-    listenButton.textContent = "Listen";
+    listenButton.textContent = "Receive";
     listenButton.classList.add("primary");
   }
 });

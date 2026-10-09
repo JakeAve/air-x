@@ -30,12 +30,19 @@ export class Encoder {
 
   next(type: PacketType = PacketType.Data): Packet {
     const packet = this.symbol(this.nextSymbolId, type);
-    this.nextSymbolId++;
+    // ponytail: after a wrap session.ts's ack bookkeeping stops producing rate samples; accepted, a transfer still running after that many symbols is not being received.
+    this.nextSymbolId = this.nextSymbolId === this.#maxSymbolId
+      ? 0
+      : this.nextSymbolId + 1;
     return packet;
   }
 
+  get #maxSymbolId(): number {
+    return this.k <= COMPACT_MAX_K ? COMPACT_MAX_SYMBOL_ID : MAX_SYMBOL_ID;
+  }
+
   symbol(symbolId: number, type: PacketType = PacketType.Data): Packet {
-    const max = this.k <= COMPACT_MAX_K ? COMPACT_MAX_SYMBOL_ID : MAX_SYMBOL_ID;
+    const max = this.#maxSymbolId;
     if (!Number.isInteger(symbolId) || symbolId < 0 || symbolId > max) {
       throw new RangeError(
         `symbol id ${symbolId} is not an integer in 0..${max}`,

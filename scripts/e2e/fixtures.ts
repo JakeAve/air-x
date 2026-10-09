@@ -1,7 +1,7 @@
 // Builds fake-device fixtures from the real codec: a WAV for Chromium's fake
 // microphone (a single-item text bundle sent as fountain packets 0..k+3, one
 // WAV per sound protocol under test) and a y4m for its fake camera (a single-item
-// binary bundle sent as QR codes of 8 packets each, symbols 0..k+15).
+// binary bundle sent as QR codes of 4 packets each, symbols 0..k+15).
 // Chromium loops both files, so one pass through each is enough.
 import { encodeBundle } from "@/lib/bundle.ts";
 import { Encoder } from "@/lib/fountain/encoder.ts";
@@ -26,7 +26,7 @@ const SILENCE_SECONDS = 0.5;
 const QR_TRANSFER_ID = 2;
 const QR_ITEM_BYTES = 2048;
 const QR_EXTRA_SYMBOLS = 16;
-const QR_PACKETS_PER_CODE = 8;
+const QR_PACKETS_PER_CODE = 4;
 const QR_HOLD_FRAMES = 10;
 const VIDEO_WIDTH = 1280;
 const VIDEO_HEIGHT = 720;

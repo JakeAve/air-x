@@ -9,7 +9,7 @@ export const PROTOCOL_VERSION = 4;
  * A packet is wide exactly when its k is above COMPACT_MAX_K.
  */
 export const SOUND_PACKET_BYTES = 64;
-export const QR_PACKET_BYTES = 64;
+export const QR_PACKET_BYTES = 128;
 export const PACKET_HEADER_BYTES = 9;
 export const COMPACT_HEADER_BYTES = 6;
 export const PACKET_CRC_BYTES = 2;

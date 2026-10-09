@@ -38,8 +38,8 @@ for (const ecc of eccs) {
   }
 }
 
-Deno.test("8 packets at medium ecc fit version 19 (93 modules)", () => {
-  const matrix = encodeQrPackets(packets(8), "medium");
+Deno.test("4 packets at medium ecc fit version 19 (93 modules)", () => {
+  const matrix = encodeQrPackets(packets(4), "medium");
   assertEquals(matrix.length, 93);
 });
 

@@ -226,7 +226,7 @@ function ticker(id: string, start: number, suffix = ""): () => void {
 function rates() {
   const packetsPerCode = Math.max(
     1,
-    Math.round(positive(packetsPerCodeInput, 8)),
+    Math.round(positive(packetsPerCodeInput, 4)),
   );
   const fps = positive(fpsInput, 5);
   const listenEvery = Math.max(1, Math.round(positive(listenEveryInput, 8)));
@@ -287,11 +287,12 @@ function itemsChanged() {
         `input[name="send-by"][value="${pick}"]`,
       ) as HTMLInputElement).checked = true;
     }
-    const n = Math.ceil(OVERHEAD * blockCount(bytes, SOUND_PACKET_BYTES));
+    const qrN = Math.ceil(OVERHEAD * blockCount(bytes, QR_PACKET_BYTES));
+    const soundN = Math.ceil(OVERHEAD * blockCount(bytes, SOUND_PACKET_BYTES));
     const { qrPerSecond, soundPerSecond } = rates();
     sendEstimate.textContent = `${size(bytes)} · ${
-      about(n / qrPerSecond)
-    } by QR · ${about(n / soundPerSecond)} by sound`;
+      about(qrN / qrPerSecond)
+    } by QR · ${about(soundN / soundPerSecond)} by sound`;
   }, 300);
 }
 sendForm.addEventListener("input", itemsChanged);

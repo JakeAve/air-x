@@ -76,7 +76,7 @@ Deno.test("an empty bundle is one zero block", () => {
   assertEquals(encoder.next().data, new Uint8Array(DATA_BYTES));
 });
 
-Deno.test("next throws past the transfer's highest symbol id", () => {
+Deno.test("next wraps to symbol 0 after the last compact symbol id", () => {
   for (
     const [bytes, max] of [[1, COMPACT_MAX_SYMBOL_ID], [
       256 * DATA_BYTES,
@@ -86,7 +86,8 @@ Deno.test("next throws past the transfer's highest symbol id", () => {
     const encoder = new Encoder(new Uint8Array(bytes), 1, SOUND_PACKET_BYTES);
     (encoder as unknown as { nextSymbolId: number }).nextSymbolId = max;
     assertEquals(encoder.next().symbolId, max);
-    assertThrows(() => encoder.next(), RangeError);
+    assertEquals(encoder.next().symbolId, 0);
+    assertEquals(encoder.next().symbolId, 1);
   }
 });
 

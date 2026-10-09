@@ -65,8 +65,8 @@ fresh port is a clean origin. README, "Testing on phones", has the rest.
   else QR, until picked by hand) with a live time estimate of both; receive from
   camera and mic at once; log, including acks on both ends. One button per
   screen flips between Send/Listen and Stop. Tuning inputs sit under Advanced.
-  Defaults: 8 packets per code, 5 fps, ECC medium, adapt rate on; camera on,
-  scan max edge 1280, ack every 160 symbols (0 never acks); silence 12 s.
+  Defaults: 4 packets per code, 5 fps, ECC medium, adapt rate on; camera on,
+  scan max edge 1280, ack every 80 symbols (0 never acks); silence 12 s.
 - `src/adapters/` — the only browser-API code besides the entries: `pageLink.ts`
   (`openDevices`: one codec worker shared by both transports),
   `soundTransport.ts` (`SoundTransport`, a `PacketChannel`), `qrTransport.ts`
@@ -105,7 +105,8 @@ gitignored).
 - `fountain/symbols.ts` — `blockCount`, and `blockSet`: which blocks a symbol id
   XORs (systematic below K; above it, dense random rows for `k <= DENSE_MAX_K`,
   robust soliton LT otherwise).
-- `fountain/encoder.ts` — `Encoder`: an endless stream of packets for a bundle.
+- `fountain/encoder.ts` — `Encoder`: an endless stream of packets for a bundle;
+  `next()` wraps to symbol 0 after the layout's last symbol id.
 - `fountain/decoder.ts` — `Decoder`: peeling, then Gaussian elimination over
   GF(2) when peeling stalls; returns the zero-padded bundle.
 - `abort.ts` — `sleep` and `aborted` on an `AbortSignal`.
@@ -114,34 +115,37 @@ gitignored).
 - `receiver.ts` — `Receiver`: one decoder per interleaved transfer, evicts stale
   ones.
 - `session.ts` — `sendBundle` (sound or QR, never both: sound bursts of
-  `listenEvery` then a listen window, or QR codes of `packetsPerCode` at `fps`,
-  until DONE is heard; Ack packets heard on `listen` queue their blocks, and
-  each burst or code sends queued blocks before fresh symbols) and
-  `receiveBundle` (sound plus any `sources`; sends DONE by sound). Silence rules
-  count sound only: once complete, DONE goes out at once if no sound from the
-  transfer was heard within `silenceMs`, else after `silenceMs` of sound silence
-  or on a `DataListen`. After DONE, packets of that transfer (QR included) mean
-  the sender missed it, so silence re-sends DONE; silence with nothing heard
-  since DONE finishes. With `ackEvery` set, the receiver sends an `Ack` by sound
-  every `ackEvery` new symbols (resends included), with DONE's timing and
-  `turnaroundMs`; counting starts at a transfer's first symbol from a source, or
-  its first repair symbol when it comes by sound. Every ack reports the highest
-  symbol id and the count of fresh symbols heard; it names missing runs only
-  once a repair symbol was heard. Each ack is a snapshot, so a lost resend is
-  simply named again, and the sender ignores blocks already queued. A bundle
-  that finishes inside the period never acks. Acks heard from other receivers
-  count as neither symbols nor sound from the transfer. With `qr.adapt`, the
-  sender turns each pair of acks into a `RateSample` (fresh symbols sent and
-  heard at one rate) and uses the rate its `RatePolicy` returns; the first ack,
-  and one whose stretch spans a rate change, only set the baseline, and
-  `silentAfter` fresh symbols with no ack give a sample with `heard` undefined.
+  `listenEvery` then a listen window, or QR codes of `packetsPerCode` 128-byte
+  packets at `fps`, until DONE is heard; Ack packets heard on `listen` queue
+  their blocks, and each burst or code sends queued blocks before fresh symbols)
+  and `receiveBundle` (sound plus any `sources`; sends DONE by sound). Silence
+  rules count sound only: once complete, DONE goes out at once if no sound from
+  the transfer was heard within `silenceMs`, else after `silenceMs` of sound
+  silence or on a `DataListen`. After DONE, packets of that transfer (QR
+  included) mean the sender missed it, so silence re-sends DONE; silence with
+  nothing heard since DONE finishes. With `ackEvery` set, the receiver sends an
+  `Ack` by sound every `ackEvery` new symbols (resends included), with DONE's
+  timing and `turnaroundMs`; counting starts at a transfer's first symbol from a
+  source, or its first repair symbol when it comes by sound. Every ack reports
+  the highest symbol id and the count of fresh symbols heard; it names missing
+  runs only once a repair symbol was heard. Each ack is a snapshot, so a lost
+  resend is simply named again, and the sender ignores blocks already queued. A
+  bundle that finishes inside the period never acks. Acks heard from other
+  receivers count as neither symbols nor sound from the transfer. With
+  `qr.adapt`, the sender turns each pair of acks into a `RateSample` (fresh
+  symbols sent and heard at one rate) and uses the rate its `RatePolicy`
+  returns; the first ack, and one whose stretch spans a rate change, only set
+  the baseline, and `silentAfter` fresh symbols with no ack give a sample with
+  `heard` undefined.
 - `rate.ts` — the decision engine, apart from the plumbing: `RatePolicy` is a
   function from a `RateSample` to the next `QrRate`. `ladderPolicy` is the one
-  in use; its ladder and thresholds are `LADDER_DEFAULTS`, guesses to be tuned
-  on phones. The receiver needs no rate: a code says how many packets it holds.
-- `qr/` — `qrEncoder.ts` (packets into one byte-mode code, `QrEcc`),
-  `qrDecoder.ts` (RGBA frame to packets), `bytesAsText.ts`, `rasterize.ts`
-  (`QR_COLORS`, test images).
+  in use; its ladder (2 to 9 packets per code, 5 to 10 fps) and thresholds are
+  `LADDER_DEFAULTS`, guesses to be tuned on phones. `SILENT_AFTER` is 240. The
+  receiver needs no rate: a code says how many packets it holds.
+- `qr/` — `qrEncoder.ts` (128-byte packets into one byte-mode code, `QrEcc`;
+  four at medium ECC are version 19, carrying 480 data bytes), `qrDecoder.ts`
+  (RGBA frame to packets), `bytesAsText.ts`, `rasterize.ts` (`QR_COLORS`, test
+  images).
 - `sound/` — ggwave wrapper (`ggwave.ts`), libquiet wrapper (`quiet.ts`: three
   profiles with `frame_length` set to one packet, so a frame is a packet or
   nothing; output is scaled so `volume` maps to peak amplitude like ggwave),
@@ -151,15 +155,17 @@ gitignored).
 
 Wire facts (multi-byte fields big-endian):
 
-- Packet, 64 bytes by sound: first byte `version 4b | wide 1b | type 3b`, then
-  compact `transferId u16 | k u8 | symbolId u16 | data 56B | crc16` or wide
-  `transferId u16 | k u24 | symbolId u24 | data 53B | crc16`. A packet is wide
-  exactly when `k > COMPACT_MAX_K` (255), so `Done` (k 0) is compact and an
-  `Ack` uses its transfer's layout. `blockCount` takes the count at the compact
-  data size if that is at most 255, else the count at the wide size. A compact
-  transfer's symbol ids stop at 65535. Types: `Data`, `DataListen`, `Done`,
-  `Ack` (`symbolId` is the highest id heard; data is 12 runs of
-  `start u24 | length u8`, then fresh symbols heard as a u24).
+- Packet, 64 bytes by sound and 128 by QR: first byte
+  `version 4b | wide 1b | type 3b`, then compact
+  `transferId u16 | k u8 | symbolId u16 | data 56B | crc16` or wide
+  `transferId u16 | k u24 | symbolId u24 | data 53B | crc16` (data is 120 and
+  117 bytes in a QR packet). A packet is wide exactly when `k > COMPACT_MAX_K`
+  (255), so `Done` (k 0) is compact and an `Ack` uses its transfer's layout.
+  `blockCount` takes the count at the compact data size if that is at most 255,
+  else the count at the wide size. A compact transfer's symbol ids stop at
+  65535; a sender that reaches the last id starts again at 0. Types: `Data`,
+  `DataListen`, `Done`, `Ack` (`symbolId` is the highest id heard; data is 12
+  runs of `start u24 | length u8`, then fresh symbols heard as a u24).
 - Bundle:
   `u32 length | deflate-raw(u32 manifestLength | manifest JSON | item bytes...) | sha256[0..8]`.
   `length` counts compressed bytes plus hash, so block padding past it is

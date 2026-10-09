@@ -5,10 +5,13 @@ import { encodeBundle, type Item } from "@/lib/bundle.ts";
 import { blockCount } from "@/lib/fountain/symbols.ts";
 import { receiveBundle, sendBundle } from "@/lib/session.ts";
 import { PACKET_SECONDS } from "@/lib/protocol.ts";
+import { ladderPolicy, SILENT_AFTER } from "@/lib/rate.ts";
 import type { QrEcc } from "@/lib/qr/qrEncoder.ts";
 import type { SoundProtocol } from "@/lib/sound/ggwave.ts";
 
 const SILENCE_MS = 12_000;
+/** How often a receive logs what its camera scan has seen. */
+const SCAN_REPORT_MS = 5_000;
 const SOUND_DEFAULT_MAX_BYTES = 2048;
 /** Packets the sender expects to need: k plus 10 % repair. */
 const OVERHEAD = 1.1;
@@ -27,6 +30,7 @@ const sendEstimate = $<HTMLParagraphElement>("send-estimate");
 const packetsPerCodeInput = $<HTMLInputElement>("packets-per-code");
 const fpsInput = $<HTMLInputElement>("fps");
 const eccSelect = $<HTMLSelectElement>("ecc");
+const adaptRateToggle = $<HTMLInputElement>("adapt-rate");
 const protocolSelect = $<HTMLSelectElement>("protocol");
 const listenEveryInput = $<HTMLInputElement>("listen-every");
 const windowMsInput = $<HTMLInputElement>("window-ms");
@@ -351,24 +355,40 @@ sendButton.addEventListener("click", async () => {
     log(
       `send: ${items.length} item(s), ${bundle.length} bytes` +
         (by === "qr"
-          ? `, qr ${packetsPerCode}/code @ ${fps} fps ${qr.ecc}`
+          ? `, qr ${packetsPerCode}/code @ ${fps} fps ${qr.ecc}${
+            adaptRateToggle.checked ? ", adaptive" : ""
+          }`
           : `, sound ${sound.protocol} listenEvery ${listenEvery} window ${windowMs} ms`),
     );
     let announced = false;
     // Past the first n packets the grid empties and refills once per pass.
     let pass = 0;
     let ackedSoFar = 0;
+    let rateNow = packetsPerCode * fps;
     result = await sendBundle(bundle, {
       listen: sound,
       sound: by === "sound"
         ? { channel: sound, listenEvery, windowMs }
         : undefined,
-      qr: by === "qr" ? { display: qr, packetsPerCode, fps } : undefined,
+      qr: by === "qr"
+        ? {
+          display: qr,
+          packetsPerCode,
+          fps,
+          adapt: adaptRateToggle.checked
+            ? { policy: ladderPolicy(), silentAfter: SILENT_AFTER }
+            : undefined,
+        }
+        : undefined,
       signal: controller.signal,
       onProgress: (
-        { transferId, k, soundSent, qrSent, via, symbolIds, acked },
+        { transferId, k, soundSent, qrSent, via, symbolIds, acked, rate },
       ) => {
         const sent = soundSent + qrSent;
+        if (rate && rate.packetsPerCode * rate.fps !== rateNow) {
+          rateNow = rate.packetsPerCode * rate.fps;
+          log(`send: rate now ${rate.packetsPerCode}/code @ ${rate.fps} fps`);
+        }
         if (acked > ackedSoFar) {
           log(`send: ack heard: ${acked - ackedSoFar} blocks`);
           ackedSoFar = acked;
@@ -503,6 +523,7 @@ listenButton.addEventListener("click", async () => {
   listenButton.classList.remove("primary");
   gridReset("rx-grid", 0, 1, 1);
   show("rx-count", "waiting for a transfer");
+  let scanReport: ReturnType<typeof setInterval> | undefined;
   try {
     const { sound, qr } = await opened;
     scanningQr = cameraToggle.checked;
@@ -511,6 +532,14 @@ listenButton.addEventListener("click", async () => {
     objectUrls = [];
     receivedItems.replaceChildren();
     Object.assign(qr.stats, { frames: 0, codes: 0, packets: 0 });
+    if (scanningQr) {
+      scanReport = setInterval(() => {
+        const { frames, codes, packets } = qr.stats;
+        log(
+          `receive: camera ${preview.videoWidth}x${preview.videoHeight}, scanned ${frames} frames, ${codes} with a code, ${packets} packets`,
+        );
+      }, SCAN_REPORT_MS);
+    }
     const start = performance.now();
     stopTicker = ticker("rx-time", start);
     const turnaround = turnaroundMs();
@@ -604,6 +633,7 @@ listenButton.addEventListener("click", async () => {
     log(`receive failed: ${err}`);
   } finally {
     stopTicker?.();
+    clearInterval(scanReport);
     running = undefined;
     scanningQr = false;
     closeCamera();

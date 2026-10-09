@@ -10,6 +10,8 @@ import type { QrEcc } from "@/lib/qr/qrEncoder.ts";
 import type { SoundProtocol } from "@/lib/sound/ggwave.ts";
 
 const SILENCE_MS = 12_000;
+/** How often a receive logs what its camera scan has seen. */
+const SCAN_REPORT_MS = 5_000;
 const SOUND_DEFAULT_MAX_BYTES = 2048;
 /** Packets the sender expects to need: k plus 10 % repair. */
 const OVERHEAD = 1.1;
@@ -521,6 +523,7 @@ listenButton.addEventListener("click", async () => {
   listenButton.classList.remove("primary");
   gridReset("rx-grid", 0, 1, 1);
   show("rx-count", "waiting for a transfer");
+  let scanReport: ReturnType<typeof setInterval> | undefined;
   try {
     const { sound, qr } = await opened;
     scanningQr = cameraToggle.checked;
@@ -529,6 +532,14 @@ listenButton.addEventListener("click", async () => {
     objectUrls = [];
     receivedItems.replaceChildren();
     Object.assign(qr.stats, { frames: 0, codes: 0, packets: 0 });
+    if (scanningQr) {
+      scanReport = setInterval(() => {
+        const { frames, codes, packets } = qr.stats;
+        log(
+          `receive: camera ${preview.videoWidth}x${preview.videoHeight}, scanned ${frames} frames, ${codes} with a code, ${packets} packets`,
+        );
+      }, SCAN_REPORT_MS);
+    }
     const start = performance.now();
     stopTicker = ticker("rx-time", start);
     const turnaround = turnaroundMs();
@@ -622,6 +633,7 @@ listenButton.addEventListener("click", async () => {
     log(`receive failed: ${err}`);
   } finally {
     stopTicker?.();
+    clearInterval(scanReport);
     running = undefined;
     scanningQr = false;
     closeCamera();

@@ -3,7 +3,9 @@ import { sleep } from "./abort.ts";
 import { encodeBundle, type Item } from "./bundle.ts";
 import type { PacketChannel, PacketDisplay, PacketSource } from "./channel.ts";
 import { Encoder } from "./fountain/encoder.ts";
-import { DENSE_MAX_K } from "./protocol.ts";
+import { dataBytes, DENSE_MAX_K, SOUND_PACKET_BYTES } from "./protocol.ts";
+
+const DATA_BYTES = dataBytes(SOUND_PACKET_BYTES, 0);
 import {
   ackHeard,
   decodeAck,
@@ -293,8 +295,10 @@ Deno.test("foreign transfers and corrupt bytes are counted and ignored", async (
     onProgress: (p) => last = p,
   });
 
-  const foreign = new Encoder(bundle, 0).next();
-  const corrupt = encodePacket(new Encoder(bundle, 1).next());
+  const foreign = new Encoder(bundle, 0, SOUND_PACKET_BYTES).next();
+  const corrupt = encodePacket(
+    new Encoder(bundle, 1, SOUND_PACKET_BYTES).next(),
+  );
   corrupt[20] ^= 0xff;
   await air.party().send(
     [encodePacket(foreign), corrupt, new Uint8Array(10)],
@@ -414,7 +418,7 @@ Deno.test("an Ack queues its blocks ahead of fresh symbols", async () => {
         transferId: p.transferId,
         k: p.k,
         symbolId: 0,
-        data: encodeAck([{ start: 2, length: 3 }]),
+        data: encodeAck([{ start: 2, length: 3 }], 0, DATA_BYTES),
       }));
     },
   });
@@ -517,7 +521,7 @@ Deno.test("a QR receiver acks the blocks of dropped codes and the sender resends
   stopReceiver.abort();
   assertEquals((await received)?.items, items);
   assert(last);
-  assertEquals(last!.k, 41);
+  assertEquals(last!.k, 18);
   assert(acks.length >= 1);
   // Acks before the first repair symbol name no blocks. A repair symbol may
   // peel a dropped block by luck before the ack, so the first ack with runs
@@ -580,7 +584,7 @@ Deno.test("dense repair finishes inside the ack period, so no ack goes out", asy
     sound: air.party(),
     sources: [display],
     silenceMs: 60_000,
-    ackEvery: 160,
+    ackEvery: 80,
     signal: stopReceiver.signal,
     onProgress: (p) => last = p,
   });
@@ -750,7 +754,7 @@ async function adaptiveSend(
         transferId: p.transferId,
         k: p.k,
         symbolId: ack[0],
-        data: encodeAck([], ack[1]),
+        data: encodeAck([], ack[1], DATA_BYTES),
       }));
     },
   });

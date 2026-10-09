@@ -6,13 +6,15 @@ import { rasterize } from "./rasterize.ts";
 import { bytesToText, textToBytes } from "./bytesAsText.ts";
 import { Encoder } from "../fountain/encoder.ts";
 import { encodePacket } from "../packet.ts";
-import { DATA_BYTES } from "../protocol.ts";
+import { dataBytes, QR_PACKET_BYTES } from "../protocol.ts";
+
+const DATA_BYTES = dataBytes(QR_PACKET_BYTES, 0);
 
 function packets(n: number, transferId = 1): Uint8Array[] {
   const bundle = new Uint8Array(DATA_BYTES * n).map((_, i) =>
     (i * 131 + 7) & 0xff
   );
-  const encoder = new Encoder(bundle, transferId);
+  const encoder = new Encoder(bundle, transferId, QR_PACKET_BYTES);
   return Array.from({ length: n }, () => encodePacket(encoder.next()));
 }
 
@@ -36,8 +38,8 @@ for (const ecc of eccs) {
   }
 }
 
-Deno.test("8 packets at medium ecc fit version 19 (93 modules)", () => {
-  const matrix = encodeQrPackets(packets(8), "medium");
+Deno.test("4 packets at medium ecc fit version 19 (93 modules)", () => {
+  const matrix = encodeQrPackets(packets(4), "medium");
   assertEquals(matrix.length, 93);
 });
 

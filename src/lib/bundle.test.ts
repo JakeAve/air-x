@@ -1,6 +1,8 @@
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import { BundleError, decodeBundle, encodeBundle, Item } from "./bundle.ts";
-import { DATA_BYTES } from "./protocol.ts";
+import { dataBytes, SOUND_PACKET_BYTES } from "./protocol.ts";
+
+const DATA_BYTES = dataBytes(SOUND_PACKET_BYTES, 0);
 
 function seededRandom(seed: number) {
   let s = seed;

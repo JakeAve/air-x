@@ -3,10 +3,11 @@ import {
   ACK_MAX_RUN,
   ACK_RUN_BYTES,
   ACK_RUNS,
-  DATA_BYTES,
+  COMPACT_HEADER_BYTES,
+  COMPACT_MAX_K,
+  COMPACT_MAX_SYMBOL_ID,
   MAX_K,
   MAX_SYMBOL_ID,
-  PACKET_BYTES,
   PACKET_CRC_BYTES,
   PACKET_HEADER_BYTES,
   PROTOCOL_VERSION,
@@ -28,6 +29,9 @@ const PACKET_TYPES = [
 ];
 
 const MAX_TRANSFER_ID = 2 ** 16 - 1;
+const PACKET_LENGTHS = [64, 128];
+/** First-byte flag: the wide header, used exactly when k is above COMPACT_MAX_K. */
+const WIDE = 0b1000;
 
 export interface Packet {
   type: PacketType;
@@ -44,54 +48,80 @@ function assertRange(value: number, max: number, name: string): void {
 }
 
 export function encodePacket(packet: Packet): Uint8Array {
-  assertRange(packet.type, 0b1111, "type");
+  assertRange(packet.type, 0b111, "type");
   assertRange(packet.transferId, MAX_TRANSFER_ID, "transferId");
   assertRange(packet.k, MAX_K, "k");
-  assertRange(packet.symbolId, MAX_SYMBOL_ID, "symbolId");
-  if (packet.data.length !== DATA_BYTES) {
+  const wide = packet.k > COMPACT_MAX_K;
+  assertRange(
+    packet.symbolId,
+    wide ? MAX_SYMBOL_ID : COMPACT_MAX_SYMBOL_ID,
+    "symbolId",
+  );
+  const header = wide ? PACKET_HEADER_BYTES : COMPACT_HEADER_BYTES;
+  const length = header + packet.data.length + PACKET_CRC_BYTES;
+  if (!PACKET_LENGTHS.includes(length)) {
     throw new RangeError(
-      `data must be ${DATA_BYTES} bytes, got ${packet.data.length}`,
+      `packet must be ${PACKET_LENGTHS.join(" or ")} bytes, got ${length}`,
     );
   }
 
-  const bytes = new Uint8Array(PACKET_BYTES);
-  bytes[0] = (PROTOCOL_VERSION << 4) | packet.type;
+  const bytes = new Uint8Array(length);
+  bytes[0] = (PROTOCOL_VERSION << 4) | (wide ? WIDE : 0) | packet.type;
   bytes[1] = (packet.transferId >> 8) & 0xff;
   bytes[2] = packet.transferId & 0xff;
-  bytes[3] = (packet.k >> 16) & 0xff;
-  bytes[4] = (packet.k >> 8) & 0xff;
-  bytes[5] = packet.k & 0xff;
-  bytes[6] = (packet.symbolId >> 16) & 0xff;
-  bytes[7] = (packet.symbolId >> 8) & 0xff;
-  bytes[8] = packet.symbolId & 0xff;
-  bytes.set(packet.data, PACKET_HEADER_BYTES);
+  if (wide) {
+    bytes[3] = (packet.k >> 16) & 0xff;
+    bytes[4] = (packet.k >> 8) & 0xff;
+    bytes[5] = packet.k & 0xff;
+    bytes[6] = (packet.symbolId >> 16) & 0xff;
+    bytes[7] = (packet.symbolId >> 8) & 0xff;
+    bytes[8] = packet.symbolId & 0xff;
+  } else {
+    bytes[3] = packet.k;
+    bytes[4] = (packet.symbolId >> 8) & 0xff;
+    bytes[5] = packet.symbolId & 0xff;
+  }
+  bytes.set(packet.data, header);
 
-  const crc = crc16(bytes.subarray(0, PACKET_BYTES - PACKET_CRC_BYTES));
-  bytes[PACKET_BYTES - 2] = (crc >> 8) & 0xff;
-  bytes[PACKET_BYTES - 1] = crc & 0xff;
+  const crc = crc16(bytes.subarray(0, length - PACKET_CRC_BYTES));
+  bytes[length - 2] = (crc >> 8) & 0xff;
+  bytes[length - 1] = crc & 0xff;
 
   return bytes;
 }
 
 export function decodePacket(bytes: Uint8Array): Packet | undefined {
-  if (bytes.length !== PACKET_BYTES) return undefined;
+  const length = bytes.length;
+  if (!PACKET_LENGTHS.includes(length)) return undefined;
 
-  const expectedCrc = crc16(bytes.subarray(0, PACKET_BYTES - PACKET_CRC_BYTES));
-  const actualCrc = (bytes[PACKET_BYTES - 2] << 8) | bytes[PACKET_BYTES - 1];
+  const expectedCrc = crc16(bytes.subarray(0, length - PACKET_CRC_BYTES));
+  const actualCrc = (bytes[length - 2] << 8) | bytes[length - 1];
   if (actualCrc !== expectedCrc) return undefined;
 
   const version = bytes[0] >> 4;
   if (version !== PROTOCOL_VERSION) return undefined;
 
-  const type = bytes[0] & 0x0f;
+  const type = bytes[0] & 0b111;
   if (!PACKET_TYPES.includes(type)) return undefined;
 
+  const transferId = (bytes[1] << 8) | bytes[2];
+  if (!(bytes[0] & WIDE)) {
+    return {
+      type,
+      transferId,
+      k: bytes[3],
+      symbolId: (bytes[4] << 8) | bytes[5],
+      data: bytes.slice(COMPACT_HEADER_BYTES, length - PACKET_CRC_BYTES),
+    };
+  }
+  const k = (bytes[3] << 16) | (bytes[4] << 8) | bytes[5];
+  if (k <= COMPACT_MAX_K) return undefined;
   return {
     type,
-    transferId: (bytes[1] << 8) | bytes[2],
-    k: (bytes[3] << 16) | (bytes[4] << 8) | bytes[5],
+    transferId,
+    k,
     symbolId: (bytes[6] << 16) | (bytes[7] << 8) | bytes[8],
-    data: bytes.slice(PACKET_HEADER_BYTES, PACKET_HEADER_BYTES + DATA_BYTES),
+    data: bytes.slice(PACKET_HEADER_BYTES, length - PACKET_CRC_BYTES),
   };
 }
 
@@ -102,13 +132,17 @@ export interface Run {
 
 const ACK_HEARD_OFFSET = ACK_RUNS * ACK_RUN_BYTES;
 
-/** Packs runs as `start u24 | length u8` each, zero padding ending the list, then `heard` as a u24. */
-export function encodeAck(runs: Run[], heard = 0): Uint8Array {
+/** Packs runs as `start u24 | length u8` each, zero padding ending the list, then `heard` as a u24. `length` is the data size of the packet carrying it. */
+export function encodeAck(
+  runs: Run[],
+  heard: number,
+  length: number,
+): Uint8Array {
   if (runs.length > ACK_RUNS) {
     throw new RangeError(`${runs.length} runs, at most ${ACK_RUNS}`);
   }
   assertRange(heard, MAX_SYMBOL_ID, "heard");
-  const data = new Uint8Array(DATA_BYTES);
+  const data = new Uint8Array(length);
   data[ACK_HEARD_OFFSET] = (heard >> 16) & 0xff;
   data[ACK_HEARD_OFFSET + 1] = (heard >> 8) & 0xff;
   data[ACK_HEARD_OFFSET + 2] = heard & 0xff;

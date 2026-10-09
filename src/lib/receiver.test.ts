@@ -1,6 +1,8 @@
 import { assertEquals } from "@std/assert";
 import { Encoder } from "./fountain/encoder.ts";
-import { DATA_BYTES, MAX_BUNDLE_BYTES } from "./protocol.ts";
+import { dataBytes, MAX_BUNDLE_BYTES, SOUND_PACKET_BYTES } from "./protocol.ts";
+
+const DATA_BYTES = dataBytes(SOUND_PACKET_BYTES, 0);
 import { type Packet, PacketType } from "./packet.ts";
 import { Receiver } from "./receiver.ts";
 
@@ -25,8 +27,8 @@ Deno.test("decodes two interleaved transfers independently", () => {
   const random = seededRandom(1);
   const bundleA = randomBytes(random, 5 * DATA_BYTES);
   const bundleB = randomBytes(random, 3 * DATA_BYTES);
-  const encoderA = new Encoder(bundleA, 1);
-  const encoderB = new Encoder(bundleB, 2);
+  const encoderA = new Encoder(bundleA, 1, SOUND_PACKET_BYTES);
+  const encoderB = new Encoder(bundleB, 2, SOUND_PACKET_BYTES);
   const receiver = new Receiver();
 
   const completed = new Map<number, Uint8Array>();
@@ -44,7 +46,7 @@ Deno.test("decodes two interleaved transfers independently", () => {
 Deno.test("a stray packet that fails to lock does not block the real transfer", () => {
   const random = seededRandom(2);
   const bundle = randomBytes(random, 3 * DATA_BYTES);
-  const encoder = new Encoder(bundle, 7);
+  const encoder = new Encoder(bundle, 7, SOUND_PACKET_BYTES);
   const real = encoder.next();
   const receiver = new Receiver();
 
@@ -67,7 +69,7 @@ Deno.test("evicts the least recently heard transfer when stale", () => {
   const random = seededRandom(3);
   const receiver = new Receiver({ staleMs: 100, maxTransfers: 4 });
   const bundle = randomBytes(random, 2 * DATA_BYTES);
-  const encoder = new Encoder(bundle, 9);
+  const encoder = new Encoder(bundle, 9, SOUND_PACKET_BYTES);
 
   receiver.push(encoder.next(), 0);
   assertEquals(receiver.progress().map((p) => p.transferId), [9]);
@@ -75,7 +77,10 @@ Deno.test("evicts the least recently heard transfer when stale", () => {
   receiver.push(encoder.next(), 50);
   assertEquals(receiver.progress().map((p) => p.transferId), [9]);
 
-  receiver.push(new Encoder(randomBytes(random, DATA_BYTES), 99).next(), 151);
+  receiver.push(
+    new Encoder(randomBytes(random, DATA_BYTES), 99, SOUND_PACKET_BYTES).next(),
+    151,
+  );
   assertEquals(receiver.progress().map((p) => p.transferId), [99]);
 });
 
@@ -83,9 +88,21 @@ Deno.test("evicts the least recently heard transfer past maxTransfers", () => {
   const random = seededRandom(4);
   const receiver = new Receiver({ maxTransfers: 2 });
 
-  const first = new Encoder(randomBytes(random, DATA_BYTES), 1).next();
-  const second = new Encoder(randomBytes(random, DATA_BYTES), 2).next();
-  const third = new Encoder(randomBytes(random, DATA_BYTES), 3).next();
+  const first = new Encoder(
+    randomBytes(random, DATA_BYTES),
+    1,
+    SOUND_PACKET_BYTES,
+  ).next();
+  const second = new Encoder(
+    randomBytes(random, DATA_BYTES),
+    2,
+    SOUND_PACKET_BYTES,
+  ).next();
+  const third = new Encoder(
+    randomBytes(random, DATA_BYTES),
+    3,
+    SOUND_PACKET_BYTES,
+  ).next();
 
   receiver.push(first, 0);
   receiver.push(second, 1);
@@ -98,7 +115,7 @@ Deno.test("evicts the least recently heard transfer past maxTransfers", () => {
 Deno.test("reports a completed bundle exactly once", () => {
   const random = seededRandom(5);
   const bundle = randomBytes(random, 2 * DATA_BYTES);
-  const encoder = new Encoder(bundle, 4);
+  const encoder = new Encoder(bundle, 4, SOUND_PACKET_BYTES);
   const receiver = new Receiver();
 
   const results: Array<ReturnType<Receiver["push"]>> = [];
@@ -114,7 +131,7 @@ Deno.test("reports a completed bundle exactly once", () => {
 Deno.test("Done packets are ignored", () => {
   const random = seededRandom(6);
   const bundle = randomBytes(random, DATA_BYTES);
-  const encoder = new Encoder(bundle, 8);
+  const encoder = new Encoder(bundle, 8, SOUND_PACKET_BYTES);
   const receiver = new Receiver();
 
   const done: Packet = { ...encoder.next(), type: PacketType.Done };
@@ -125,7 +142,7 @@ Deno.test("Done packets are ignored", () => {
 Deno.test("forget clears the decoder so a fresh transfer can restart", () => {
   const random = seededRandom(7);
   const bundle = randomBytes(random, 2 * DATA_BYTES);
-  const encoder = new Encoder(bundle, 6);
+  const encoder = new Encoder(bundle, 6, SOUND_PACKET_BYTES);
   const receiver = new Receiver();
 
   let result;
@@ -140,7 +157,7 @@ Deno.test("forget clears the decoder so a fresh transfer can restart", () => {
   receiver.forget(6);
   assertEquals(receiver.progress(), []);
 
-  const restarted = new Encoder(bundle, 6);
+  const restarted = new Encoder(bundle, 6, SOUND_PACKET_BYTES);
   let restartedResult;
   for (let i = 0; i < 10; i++) {
     restartedResult = receiver.push(restarted.next(), i);
@@ -152,7 +169,7 @@ Deno.test("forget clears the decoder so a fresh transfer can restart", () => {
 Deno.test("Ack packets are ignored and create no transfer", () => {
   const receiver = new Receiver();
   const ack: Packet = {
-    ...new Encoder(new Uint8Array(DATA_BYTES), 3).next(),
+    ...new Encoder(new Uint8Array(DATA_BYTES), 3, SOUND_PACKET_BYTES).next(),
     type: PacketType.Ack,
   };
   assertEquals(receiver.push(ack, 0), undefined);

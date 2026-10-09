@@ -1,12 +1,16 @@
 // Builds fake-device fixtures from the real codec: a WAV for Chromium's fake
 // microphone (a single-item text bundle sent as fountain packets 0..k+3, one
 // WAV per sound protocol under test) and a y4m for its fake camera (a single-item
-// binary bundle sent as QR codes of 8 packets each, symbols 0..k+15).
+// binary bundle sent as QR codes of 4 packets each, symbols 0..k+15).
 // Chromium loops both files, so one pass through each is enough.
 import { encodeBundle } from "@/lib/bundle.ts";
 import { Encoder } from "@/lib/fountain/encoder.ts";
 import { encodePacket } from "@/lib/packet.ts";
-import { SOUND_SAMPLE_RATE } from "@/lib/protocol.ts";
+import {
+  QR_PACKET_BYTES,
+  SOUND_PACKET_BYTES,
+  SOUND_SAMPLE_RATE,
+} from "@/lib/protocol.ts";
 import type { SoundProtocol } from "@/lib/sound/ggwave.ts";
 import { SoundEncoder } from "@/lib/sound/soundEncoder.ts";
 import { encodeQrPackets } from "@/lib/qr/qrEncoder.ts";
@@ -22,7 +26,7 @@ const SILENCE_SECONDS = 0.5;
 const QR_TRANSFER_ID = 2;
 const QR_ITEM_BYTES = 2048;
 const QR_EXTRA_SYMBOLS = 16;
-const QR_PACKETS_PER_CODE = 8;
+const QR_PACKETS_PER_CODE = 4;
 const QR_HOLD_FRAMES = 10;
 const VIDEO_WIDTH = 1280;
 const VIDEO_HEIGHT = 720;
@@ -45,7 +49,7 @@ async function microphoneWav(protocol: SoundProtocol): Promise<Uint8Array> {
     type: "text/plain",
     bytes: new TextEncoder().encode(FIXTURE_TEXT),
   }]);
-  const fountain = new Encoder(bundle, TRANSFER_ID);
+  const fountain = new Encoder(bundle, TRANSFER_ID, SOUND_PACKET_BYTES);
   const soundEncoder = await SoundEncoder.create({
     protocol,
     sampleRate: SOUND_SAMPLE_RATE,
@@ -101,7 +105,7 @@ async function cameraY4m(): Promise<Uint8Array> {
     type: "application/octet-stream",
     bytes,
   }]);
-  const fountain = new Encoder(bundle, QR_TRANSFER_ID);
+  const fountain = new Encoder(bundle, QR_TRANSFER_ID, QR_PACKET_BYTES);
   const totalSymbols = fountain.k + QR_EXTRA_SYMBOLS;
 
   const text = new TextEncoder();

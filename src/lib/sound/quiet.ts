@@ -9,7 +9,7 @@ import type {
   QuietModuleOptions,
 } from "../../../types/quiet.d.ts";
 import { QUIET_MEM } from "../../../vendor/quiet/mem.ts";
-import { PACKET_BYTES, SOUND_SAMPLES_PER_BLOCK } from "@/lib/protocol.ts";
+import { SOUND_PACKET_BYTES, SOUND_SAMPLES_PER_BLOCK } from "@/lib/protocol.ts";
 
 export type QuietProtocol =
   | "quiet-audible"
@@ -34,7 +34,7 @@ const common = {
     attenuation: 60,
     filter_bank_size: 64,
   },
-  frame_length: PACKET_BYTES,
+  frame_length: SOUND_PACKET_BYTES,
 };
 
 /** quiet-js's `audible`, `audible-7k-channel-0`, and `ultrasonic-3600`, with frame_length set to one packet. */
@@ -206,7 +206,7 @@ export class QuietDecoder {
     ], [opt, sampleRate]);
     m._free(opt);
     this.#samples = m._malloc(4 * this.#capacity);
-    this.#frame = m._malloc(2 * PACKET_BYTES);
+    this.#frame = m._malloc(2 * SOUND_PACKET_BYTES);
   }
 
   /** Feeds samples and returns every whole packet that decoded. */
@@ -229,10 +229,12 @@ export class QuietDecoder {
         "number",
         "number",
         "number",
-      ], [this.#decoder, this.#frame, 2 * PACKET_BYTES]);
+      ], [this.#decoder, this.#frame, 2 * SOUND_PACKET_BYTES]);
       if (read < 0) break;
-      if (read !== PACKET_BYTES) continue;
-      packets.push(m.HEAPU8.slice(this.#frame, this.#frame + PACKET_BYTES));
+      if (read !== SOUND_PACKET_BYTES) continue;
+      packets.push(
+        m.HEAPU8.slice(this.#frame, this.#frame + SOUND_PACKET_BYTES),
+      );
     }
     return packets;
   }

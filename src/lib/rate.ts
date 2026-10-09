@@ -21,7 +21,7 @@ export interface RateSample {
 export type RatePolicy = (sample: RateSample) => QrRate;
 
 /** Fresh symbols a sender shows with no report heard before it tells the policy so. */
-export const SILENT_AFTER = 480;
+export const SILENT_AFTER = 240;
 
 export interface LadderOptions {
   /** The rates to move between, in strictly rising packets per second. */
@@ -37,14 +37,14 @@ export interface LadderOptions {
 /** Guesses until tried on phones; every one is meant to be changed. */
 export const LADDER_DEFAULTS: LadderOptions = {
   ladder: [
+    { packetsPerCode: 2, fps: 5 },
+    { packetsPerCode: 3, fps: 5 },
     { packetsPerCode: 4, fps: 5 },
     { packetsPerCode: 6, fps: 5 },
-    { packetsPerCode: 8, fps: 5 },
-    { packetsPerCode: 11, fps: 5 },
-    { packetsPerCode: 11, fps: 7 },
-    { packetsPerCode: 14, fps: 7 },
-    { packetsPerCode: 18, fps: 7 },
-    { packetsPerCode: 18, fps: 10 },
+    { packetsPerCode: 6, fps: 7 },
+    { packetsPerCode: 7, fps: 7 },
+    { packetsPerCode: 9, fps: 7 },
+    { packetsPerCode: 9, fps: 10 },
   ],
   raiseAt: 0.9,
   lowerBelow: 0.5,

@@ -6,6 +6,10 @@
 // DEV_LOG_SCRIPT appended: it posts each new line of the page's #log, plus
 // uncaught errors, to /__log, which prints them here tagged with the device's
 // address. None of it is in dist/, so none of it ships.
+//
+// The real service worker is cache-first, so a device that ever cached this
+// origin would keep running an old build. /sw.js is served as DEV_SW instead:
+// it drops every cache, unregisters, and reloads pages that were cached.
 import { serveDir } from "@std/http";
 import { join } from "@std/path";
 import { build } from "./build.ts";
@@ -36,6 +40,21 @@ const DEV_LOG_SCRIPT = `<script>
 })();
 </script>`;
 
+const DEV_SW = `
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (event) => {
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.map((key) => caches.delete(key)));
+    await self.registration.unregister();
+    if (!keys.length) return;
+    for (const client of await self.clients.matchAll({ type: "window" })) {
+      client.navigate(client.url);
+    }
+  })());
+});
+`;
+
 async function handle(req: Request, info: Deno.ServeHandlerInfo) {
   const { pathname } = new URL(req.url);
   if (pathname === LOG_PATH && req.method === "POST") {
@@ -45,6 +64,14 @@ async function handle(req: Request, info: Deno.ServeHandlerInfo) {
       if (line) console.log(`[${from}] ${line}`);
     }
     return new Response(null, { status: 204 });
+  }
+  if (pathname === "/sw.js") {
+    return new Response(DEV_SW, {
+      headers: {
+        "content-type": "text/javascript",
+        "cache-control": "no-store",
+      },
+    });
   }
   const res = await serveDir(req, { fsRoot: DIST, quiet: true });
   if (

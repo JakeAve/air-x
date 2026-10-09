@@ -1,6 +1,13 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import { encodePacket, PacketType } from "../packet.ts";
-import { DATA_BYTES, MAX_BUNDLE_BYTES, MAX_SYMBOL_ID } from "../protocol.ts";
+import {
+  dataBytes,
+  MAX_BUNDLE_BYTES,
+  MAX_SYMBOL_ID,
+  SOUND_PACKET_BYTES,
+} from "../protocol.ts";
+
+const DATA_BYTES = dataBytes(SOUND_PACKET_BYTES, 0);
 import { Encoder } from "./encoder.ts";
 import { blockSet } from "./symbols.ts";
 
@@ -16,7 +23,7 @@ function seededBytes(seed: number, length: number): Uint8Array {
 
 Deno.test("source packets carry the zero-padded bundle in order", () => {
   const bundle = seededBytes(1, 3 * DATA_BYTES + 5);
-  const encoder = new Encoder(bundle, 77);
+  const encoder = new Encoder(bundle, 77, SOUND_PACKET_BYTES);
   assertEquals(encoder.k, 4);
 
   const padded = new Uint8Array(4 * DATA_BYTES);
@@ -36,7 +43,7 @@ Deno.test("source packets carry the zero-padded bundle in order", () => {
 
 Deno.test("repair packets are the XOR of their block set", () => {
   const bundle = seededBytes(2, 20 * DATA_BYTES);
-  const encoder = new Encoder(bundle, 5);
+  const encoder = new Encoder(bundle, 5, SOUND_PACKET_BYTES);
   for (let i = 0; i < 20; i++) encoder.next();
   for (let symbolId = 20; symbolId < 220; symbolId++) {
     const packet = encoder.next(PacketType.DataListen);
@@ -57,19 +64,19 @@ Deno.test("with one block every symbol is that block", () => {
   const bundle = seededBytes(3, 10);
   const block = new Uint8Array(DATA_BYTES);
   block.set(bundle);
-  const encoder = new Encoder(bundle, 1);
+  const encoder = new Encoder(bundle, 1, SOUND_PACKET_BYTES);
   assertEquals(encoder.k, 1);
   for (let i = 0; i < 100; i++) assertEquals(encoder.next().data, block);
 });
 
 Deno.test("an empty bundle is one zero block", () => {
-  const encoder = new Encoder(new Uint8Array(0), 1);
+  const encoder = new Encoder(new Uint8Array(0), 1, SOUND_PACKET_BYTES);
   assertEquals(encoder.k, 1);
   assertEquals(encoder.next().data, new Uint8Array(DATA_BYTES));
 });
 
 Deno.test("next throws past MAX_SYMBOL_ID", () => {
-  const encoder = new Encoder(new Uint8Array(1), 1);
+  const encoder = new Encoder(new Uint8Array(1), 1, SOUND_PACKET_BYTES);
   (encoder as unknown as { nextSymbolId: number }).nextSymbolId = MAX_SYMBOL_ID;
   assertEquals(encoder.next().symbolId, MAX_SYMBOL_ID);
   assertThrows(() => encoder.next(), RangeError);
@@ -79,7 +86,7 @@ Deno.test("symbol hands out any id without moving next", () => {
   const bundle = seededBytes(4, 3 * DATA_BYTES + 5);
   const padded = new Uint8Array(4 * DATA_BYTES);
   padded.set(bundle);
-  const encoder = new Encoder(bundle, 9);
+  const encoder = new Encoder(bundle, 9, SOUND_PACKET_BYTES);
   for (let i = 3; i >= 0; i--) {
     const packet = encoder.symbol(i, PacketType.DataListen);
     assertEquals(packet.symbolId, i);
@@ -89,13 +96,16 @@ Deno.test("symbol hands out any id without moving next", () => {
       padded.slice(i * DATA_BYTES, (i + 1) * DATA_BYTES),
     );
   }
-  assertEquals(encoder.symbol(50).data, new Encoder(bundle, 9).symbol(50).data);
+  assertEquals(
+    encoder.symbol(50).data,
+    new Encoder(bundle, 9, SOUND_PACKET_BYTES).symbol(50).data,
+  );
   assertEquals(encoder.next().symbolId, 0);
   assertEquals(encoder.next().symbolId, 1);
 });
 
 Deno.test("symbol throws on an id out of range", () => {
-  const encoder = new Encoder(new Uint8Array(1), 1);
+  const encoder = new Encoder(new Uint8Array(1), 1, SOUND_PACKET_BYTES);
   assertEquals(encoder.symbol(MAX_SYMBOL_ID).symbolId, MAX_SYMBOL_ID);
   for (const id of [MAX_SYMBOL_ID + 1, -1, 1.5, NaN]) {
     assertThrows(() => encoder.symbol(id), RangeError);
@@ -104,5 +114,5 @@ Deno.test("symbol throws on an id out of range", () => {
 
 Deno.test("a bundle over MAX_BUNDLE_BYTES throws", () => {
   const huge = { length: MAX_BUNDLE_BYTES + 1 } as Uint8Array;
-  assertThrows(() => new Encoder(huge, 1), RangeError);
+  assertThrows(() => new Encoder(huge, 1, SOUND_PACKET_BYTES), RangeError);
 });

@@ -1,7 +1,13 @@
 import { assert, assertEquals } from "@std/assert";
 import { decodeBundle, encodeBundle } from "../bundle.ts";
 import { type Packet, PacketType } from "../packet.ts";
-import { DATA_BYTES, MAX_BUNDLE_BYTES } from "../protocol.ts";
+import {
+  dataBytes,
+  MAX_BUNDLE_BYTES,
+  SOUND_PACKET_BYTES,
+} from "../protocol.ts";
+
+const DATA_BYTES = dataBytes(SOUND_PACKET_BYTES, 0);
 import { Decoder } from "./decoder.ts";
 import { Encoder } from "./encoder.ts";
 
@@ -47,7 +53,7 @@ for (const k of [1, 10, 50]) {
 
   Deno.test(`k=${k}: no loss decodes from the source symbols`, () => {
     const bundle = randomBytes(seededRandom(k), k * DATA_BYTES - 7);
-    const encoder = new Encoder(bundle, 11);
+    const encoder = new Encoder(bundle, 11, SOUND_PACKET_BYTES);
     const decoder = new Decoder();
     assertEquals(feed(decoder, stream(encoder, k)), padded(bundle, k));
     assertEquals(decoder.transferId, 11);
@@ -58,7 +64,9 @@ for (const k of [1, 10, 50]) {
   Deno.test(`k=${k}: shuffled order decodes`, () => {
     const random = seededRandom(k + 100);
     const bundle = randomBytes(random, k * DATA_BYTES);
-    const packets = [...stream(new Encoder(bundle, 12), budget)];
+    const packets = [
+      ...stream(new Encoder(bundle, 12, SOUND_PACKET_BYTES), budget),
+    ];
     for (let i = packets.length - 1; i > 0; i--) {
       const j = Math.floor(random() * (i + 1));
       [packets[i], packets[j]] = [packets[j], packets[i]];
@@ -68,7 +76,7 @@ for (const k of [1, 10, 50]) {
 
   Deno.test(`k=${k}: joining at symbol 3k decodes from repair symbols`, () => {
     const bundle = randomBytes(seededRandom(k + 200), k * DATA_BYTES);
-    const encoder = new Encoder(bundle, 13);
+    const encoder = new Encoder(bundle, 13, SOUND_PACKET_BYTES);
     for (let i = 0; i < 3 * k; i++) encoder.next();
     assertEquals(
       feed(new Decoder(), stream(encoder, budget)),
@@ -79,7 +87,11 @@ for (const k of [1, 10, 50]) {
   Deno.test(`k=${k}: 20% random loss decodes`, () => {
     const random = seededRandom(k + 300);
     const bundle = randomBytes(random, k * DATA_BYTES);
-    const packets = lossy(stream(new Encoder(bundle, 14), budget), random, 0.2);
+    const packets = lossy(
+      stream(new Encoder(bundle, 14, SOUND_PACKET_BYTES), budget),
+      random,
+      0.2,
+    );
     assertEquals(feed(new Decoder(), packets), padded(bundle, k));
   });
 }
@@ -87,8 +99,12 @@ for (const k of [1, 10, 50]) {
 Deno.test("ignores foreign transfers, Done packets, and mismatched k", () => {
   const random = seededRandom(400);
   const bundle = randomBytes(random, 20 * DATA_BYTES);
-  const ours = new Encoder(bundle, 1);
-  const foreign = new Encoder(randomBytes(random, 20 * DATA_BYTES), 2);
+  const ours = new Encoder(bundle, 1, SOUND_PACKET_BYTES);
+  const foreign = new Encoder(
+    randomBytes(random, 20 * DATA_BYTES),
+    2,
+    SOUND_PACKET_BYTES,
+  );
   const decoder = new Decoder();
 
   function* interleaved(): Generator<Packet> {
@@ -107,7 +123,9 @@ Deno.test("ignores foreign transfers, Done packets, and mismatched k", () => {
 
 Deno.test("locks onto the first data packet, not a Done", () => {
   const decoder = new Decoder();
-  const done = new Encoder(new Uint8Array(1), 9).next(PacketType.Done);
+  const done = new Encoder(new Uint8Array(1), 9, SOUND_PACKET_BYTES).next(
+    PacketType.Done,
+  );
   assertEquals(decoder.push(done), undefined);
   assertEquals(decoder.transferId, undefined);
   assertEquals(decoder.k, undefined);
@@ -115,7 +133,7 @@ Deno.test("locks onto the first data packet, not a Done", () => {
 
 Deno.test("ignores a k=0 or oversize-k packet, then locks onto a real transfer", () => {
   const bundle = randomBytes(seededRandom(800), 3 * DATA_BYTES);
-  const encoder = new Encoder(bundle, 42);
+  const encoder = new Encoder(bundle, 42, SOUND_PACKET_BYTES);
   const decoder = new Decoder();
   const real = encoder.next();
 
@@ -133,7 +151,7 @@ Deno.test("ignores a k=0 or oversize-k packet, then locks onto a real transfer",
 
 Deno.test("a duplicate symbol is ignored", () => {
   const bundle = randomBytes(seededRandom(500), 2 * DATA_BYTES);
-  const encoder = new Encoder(bundle, 3);
+  const encoder = new Encoder(bundle, 3, SOUND_PACKET_BYTES);
   const decoder = new Decoder();
   const first = encoder.next();
   decoder.push(first);
@@ -144,7 +162,7 @@ Deno.test("a duplicate symbol is ignored", () => {
 
 Deno.test("keeps returning the bytes after completion", () => {
   const bundle = randomBytes(seededRandom(600), 3 * DATA_BYTES);
-  const encoder = new Encoder(bundle, 4);
+  const encoder = new Encoder(bundle, 4, SOUND_PACKET_BYTES);
   const decoder = new Decoder();
   feed(decoder, stream(encoder, 3));
   assertEquals(decoder.push(encoder.next()), padded(bundle, 3));
@@ -161,7 +179,7 @@ Deno.test("Encoder to Decoder to decodeBundle recovers the items", async () => {
     },
   ];
   const bundle = await encodeBundle(items);
-  const encoder = new Encoder(bundle, 321);
+  const encoder = new Encoder(bundle, 321, SOUND_PACKET_BYTES);
   for (let i = 0; i < encoder.k; i++) encoder.next();
   const packets = lossy(stream(encoder, 3 * encoder.k + 20), random, 0.2);
   const bytes = feed(new Decoder(), packets);
@@ -171,7 +189,11 @@ Deno.test("Encoder to Decoder to decodeBundle recovers the items", async () => {
 
 Deno.test("states: unseen, pending, then resolved per block", () => {
   const k = 4;
-  const encoder = new Encoder(randomBytes(seededRandom(7), k * DATA_BYTES), 3);
+  const encoder = new Encoder(
+    randomBytes(seededRandom(7), k * DATA_BYTES),
+    3,
+    SOUND_PACKET_BYTES,
+  );
   const decoder = new Decoder();
   assertEquals(decoder.states(), new Uint8Array(0));
   // Systematic symbol 1 resolves block 1 alone.
@@ -192,7 +214,11 @@ Deno.test("states: unseen, pending, then resolved per block", () => {
 });
 
 function systematic(k: number): Packet[] {
-  const encoder = new Encoder(new Uint8Array(k * DATA_BYTES).fill(7), 5);
+  const encoder = new Encoder(
+    new Uint8Array(k * DATA_BYTES).fill(7),
+    5,
+    SOUND_PACKET_BYTES,
+  );
   return Array.from({ length: k }, () => encoder.next());
 }
 
@@ -222,4 +248,29 @@ Deno.test("an Ack packet is ignored by the decoder", () => {
   const decoder = new Decoder();
   assertEquals(decoder.push(ack), undefined);
   assertEquals(decoder.k, undefined);
+});
+
+Deno.test("decodes a transfer of 128-byte packets", () => {
+  const random = seededRandom(900);
+  const bundle = randomBytes(random, 10 * 117 - 7);
+  const encoder = new Encoder(bundle, 15, 128);
+  assertEquals(encoder.dataBytes, 117);
+  const packets = lossy(stream(encoder, 50), random, 0.2);
+  const out = new Uint8Array(10 * 117);
+  out.set(bundle);
+  assertEquals(feed(new Decoder(), packets), out);
+});
+
+Deno.test("ignores a packet whose data length differs from the transfer's", () => {
+  const bundle = randomBytes(seededRandom(901), 2 * DATA_BYTES);
+  const encoder = new Encoder(bundle, 16, SOUND_PACKET_BYTES);
+  const decoder = new Decoder();
+  decoder.push(encoder.next());
+  const second = encoder.next();
+  assertEquals(
+    decoder.push({ ...second, data: new Uint8Array(117) }),
+    undefined,
+  );
+  assertEquals(decoder.resolved, 1);
+  assertEquals(decoder.push(second), padded(bundle, 2));
 });

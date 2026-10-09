@@ -6,7 +6,11 @@
 import { encodeBundle } from "@/lib/bundle.ts";
 import { Encoder } from "@/lib/fountain/encoder.ts";
 import { encodePacket } from "@/lib/packet.ts";
-import { SOUND_SAMPLE_RATE } from "@/lib/protocol.ts";
+import {
+  QR_PACKET_BYTES,
+  SOUND_PACKET_BYTES,
+  SOUND_SAMPLE_RATE,
+} from "@/lib/protocol.ts";
 import type { SoundProtocol } from "@/lib/sound/ggwave.ts";
 import { SoundEncoder } from "@/lib/sound/soundEncoder.ts";
 import { encodeQrPackets } from "@/lib/qr/qrEncoder.ts";
@@ -45,7 +49,7 @@ async function microphoneWav(protocol: SoundProtocol): Promise<Uint8Array> {
     type: "text/plain",
     bytes: new TextEncoder().encode(FIXTURE_TEXT),
   }]);
-  const fountain = new Encoder(bundle, TRANSFER_ID);
+  const fountain = new Encoder(bundle, TRANSFER_ID, SOUND_PACKET_BYTES);
   const soundEncoder = await SoundEncoder.create({
     protocol,
     sampleRate: SOUND_SAMPLE_RATE,
@@ -101,7 +105,7 @@ async function cameraY4m(): Promise<Uint8Array> {
     type: "application/octet-stream",
     bytes,
   }]);
-  const fountain = new Encoder(bundle, QR_TRANSFER_ID);
+  const fountain = new Encoder(bundle, QR_TRANSFER_ID, QR_PACKET_BYTES);
   const totalSymbols = fountain.k + QR_EXTRA_SYMBOLS;
 
   const text = new TextEncoder();

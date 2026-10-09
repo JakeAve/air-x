@@ -4,7 +4,11 @@ import type { SoundTransport } from "@/adapters/soundTransport.ts";
 import { encodeBundle, type Item } from "@/lib/bundle.ts";
 import { blockCount } from "@/lib/fountain/symbols.ts";
 import { receiveBundle, sendBundle } from "@/lib/session.ts";
-import { PACKET_SECONDS } from "@/lib/protocol.ts";
+import {
+  PACKET_SECONDS,
+  QR_PACKET_BYTES,
+  SOUND_PACKET_BYTES,
+} from "@/lib/protocol.ts";
 import { ladderPolicy, SILENT_AFTER } from "@/lib/rate.ts";
 import type { QrEcc } from "@/lib/qr/qrEncoder.ts";
 import type { SoundProtocol } from "@/lib/sound/ggwave.ts";
@@ -283,7 +287,7 @@ function itemsChanged() {
         `input[name="send-by"][value="${pick}"]`,
       ) as HTMLInputElement).checked = true;
     }
-    const n = Math.ceil(OVERHEAD * blockCount(bytes));
+    const n = Math.ceil(OVERHEAD * blockCount(bytes, SOUND_PACKET_BYTES));
     const { qrPerSecond, soundPerSecond } = rates();
     sendEstimate.textContent = `${size(bytes)} · ${
       about(n / qrPerSecond)
@@ -327,7 +331,12 @@ sendButton.addEventListener("click", async () => {
       soundPerSecond,
     } = rates();
     const perSecond = by === "qr" ? qrPerSecond : soundPerSecond;
-    const n = Math.ceil(OVERHEAD * blockCount(bundle.length));
+    const n = Math.ceil(
+      OVERHEAD * blockCount(
+        bundle.length,
+        by === "qr" ? QR_PACKET_BYTES : SOUND_PACKET_BYTES,
+      ),
+    );
     sendTitle.textContent = "sending";
     sendForm.hidden = true;
     sendRun.hidden = false;

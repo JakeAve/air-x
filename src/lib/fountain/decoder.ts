@@ -1,5 +1,5 @@
 import { type Packet, PacketType, type Run } from "../packet.ts";
-import { ACK_MAX_RUN, DATA_BYTES, MAX_BUNDLE_BYTES } from "../protocol.ts";
+import { ACK_MAX_RUN, MAX_BUNDLE_BYTES } from "../protocol.ts";
 import { blockSet } from "./symbols.ts";
 
 // Bounds one elimination to about 512² bit operations; above it peeling alone
@@ -14,6 +14,8 @@ interface PendingSymbol {
 export class Decoder {
   #transferId: number | undefined;
   #k: number | undefined;
+  /** Block size, the data length of the first accepted packet. */
+  #dataBytes = 0;
   #resolved = 0;
   #blocks = new Uint8Array(0);
   #isResolved = new Uint8Array(0);
@@ -77,16 +79,20 @@ export class Decoder {
     }
 
     if (this.#k === undefined) {
-      if (packet.k < 1 || packet.k * DATA_BYTES > MAX_BUNDLE_BYTES) {
+      if (packet.k < 1 || packet.k * packet.data.length > MAX_BUNDLE_BYTES) {
         return undefined;
       }
       this.#transferId = packet.transferId;
       this.#k = packet.k;
-      this.#blocks = new Uint8Array(packet.k * DATA_BYTES);
+      this.#dataBytes = packet.data.length;
+      this.#blocks = new Uint8Array(packet.k * this.#dataBytes);
       this.#isResolved = new Uint8Array(packet.k);
       this.#pendingByBlock = Array.from({ length: packet.k }, () => new Set());
     }
-    if (packet.transferId !== this.#transferId || packet.k !== this.#k) {
+    if (
+      packet.transferId !== this.#transferId || packet.k !== this.#k ||
+      packet.data.length !== this.#dataBytes
+    ) {
       return undefined;
     }
     if (this.#seen.has(packet.symbolId)) return undefined;
@@ -124,7 +130,7 @@ export class Decoder {
     for (let entry; (entry = queue.pop());) {
       const [b, d] = entry;
       if (this.#isResolved[b]) continue;
-      this.#blocks.set(d, b * DATA_BYTES);
+      this.#blocks.set(d, b * this.#dataBytes);
       this.#isResolved[b] = 1;
       this.#resolved++;
 
@@ -156,13 +162,13 @@ export class Decoder {
     const symbols = [...this.#pending];
     const m = symbols.length;
     const bits = new Uint32Array(m * words);
-    const data = new Uint8Array(m * DATA_BYTES);
+    const data = new Uint8Array(m * this.#dataBytes);
     symbols.forEach((symbol, row) => {
       for (const b of symbol.blocks) {
         const col = columns[b];
         bits[row * words + (col >>> 5)] |= 1 << (col & 31);
       }
-      data.set(symbol.data, row * DATA_BYTES);
+      data.set(symbol.data, row * this.#dataBytes);
     });
 
     const rows = Array.from({ length: m }, (_, i) => i);
@@ -182,8 +188,8 @@ export class Decoder {
         for (let w = 0; w < words; w++) {
           bits[row * words + w] ^= bits[pivot * words + w];
         }
-        for (let j = 0; j < DATA_BYTES; j++) {
-          data[row * DATA_BYTES + j] ^= data[pivot * DATA_BYTES + j];
+        for (let j = 0; j < this.#dataBytes; j++) {
+          data[row * this.#dataBytes + j] ^= data[pivot * this.#dataBytes + j];
         }
       }
       pivots.push(col);
@@ -197,15 +203,17 @@ export class Decoder {
       if (weight === 1) {
         this.#resolve(
           unresolved[col],
-          data.slice(row * DATA_BYTES, (row + 1) * DATA_BYTES),
+          data.slice(row * this.#dataBytes, (row + 1) * this.#dataBytes),
         );
       }
     });
   }
 
   #xorBlock(data: Uint8Array, block: number): void {
-    const offset = block * DATA_BYTES;
-    for (let i = 0; i < DATA_BYTES; i++) data[i] ^= this.#blocks[offset + i];
+    const offset = block * this.#dataBytes;
+    for (let i = 0; i < this.#dataBytes; i++) {
+      data[i] ^= this.#blocks[offset + i];
+    }
   }
 }
 

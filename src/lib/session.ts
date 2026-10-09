@@ -12,7 +12,12 @@ import {
   PacketType,
   type Run,
 } from "./packet.ts";
-import { ACK_RUNS, DATA_BYTES } from "./protocol.ts";
+import {
+  ACK_RUNS,
+  dataBytes,
+  QR_PACKET_BYTES,
+  SOUND_PACKET_BYTES,
+} from "./protocol.ts";
 import type { QrRate, RatePolicy } from "./rate.ts";
 import { type Completed, Receiver, type TransferProgress } from "./receiver.ts";
 
@@ -72,7 +77,11 @@ export async function sendBundle(
     throw new RangeError("sendBundle takes sound or qr, not both");
   }
   const transferId = crypto.getRandomValues(new Uint16Array(1))[0];
-  const encoder = new Encoder(bundle, transferId);
+  const encoder = new Encoder(
+    bundle,
+    transferId,
+    qr ? QR_PACKET_BYTES : SOUND_PACKET_BYTES,
+  );
   const heardDone = new AbortController();
   const stop = anySignal(signal, heardDone.signal);
   let soundSent = 0;
@@ -293,7 +302,7 @@ export function receiveBundle(
             transferId,
             k: 0,
             symbolId: 0,
-            data: new Uint8Array(DATA_BYTES),
+            data: new Uint8Array(dataBytes(SOUND_PACKET_BYTES, 0)),
           }),
         ], signal);
         if (finished) return;
@@ -342,7 +351,11 @@ export function receiveBundle(
             transferId,
             k: transfer.k,
             symbolId: highest,
-            data: encodeAck(runs, heard),
+            data: encodeAck(
+              runs,
+              heard,
+              dataBytes(SOUND_PACKET_BYTES, transfer.k),
+            ),
           }),
         ], signal);
         if (finished) return;

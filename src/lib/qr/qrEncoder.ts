@@ -1,5 +1,5 @@
 import encodeQR from "qr";
-import { PACKET_BYTES } from "../protocol.ts";
+import { QR_PACKET_BYTES } from "../protocol.ts";
 import { bytesToText, textToBytes } from "./bytesAsText.ts";
 
 /** Module grid, `matrix[y][x]` true for a dark module. No quiet zone. */
@@ -16,14 +16,14 @@ export function encodeQrPackets(
   if (packets.length === 0) {
     throw new RangeError(`expected at least 1 packet, got 0`);
   }
-  const bytes = new Uint8Array(packets.length * PACKET_BYTES);
+  const bytes = new Uint8Array(packets.length * QR_PACKET_BYTES);
   packets.forEach((packet, i) => {
-    if (packet.length !== PACKET_BYTES) {
+    if (packet.length !== QR_PACKET_BYTES) {
       throw new RangeError(
-        `packet ${i} must be ${PACKET_BYTES} bytes, got ${packet.length}`,
+        `packet ${i} must be ${QR_PACKET_BYTES} bytes, got ${packet.length}`,
       );
     }
-    bytes.set(packet, i * PACKET_BYTES);
+    bytes.set(packet, i * QR_PACKET_BYTES);
   });
   return encodeQR(bytesToText(bytes), "raw", {
     ecc,

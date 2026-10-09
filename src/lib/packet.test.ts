@@ -9,12 +9,14 @@ import {
   PacketType,
 } from "./packet.ts";
 import {
-  DATA_BYTES,
+  dataBytes,
   MAX_K,
   MAX_SYMBOL_ID,
-  PACKET_BYTES,
   PROTOCOL_VERSION,
+  SOUND_PACKET_BYTES,
 } from "./protocol.ts";
+
+const DATA_BYTES = dataBytes(SOUND_PACKET_BYTES, 0);
 
 function seededRandom(seed: number) {
   let s = seed;
@@ -38,7 +40,7 @@ Deno.test("a packet round trips through encode and decode", () => {
       data: randomData(random),
     };
     const bytes = encodePacket(packet);
-    assertEquals(bytes.length, PACKET_BYTES);
+    assertEquals(bytes.length, SOUND_PACKET_BYTES);
     assertEquals(decodePacket(bytes), packet);
   }
 });
@@ -110,8 +112,8 @@ Deno.test("an unknown type nibble decodes to undefined", () => {
 });
 
 Deno.test("a wrong length decodes to undefined", () => {
-  assertEquals(decodePacket(new Uint8Array(PACKET_BYTES - 1)), undefined);
-  assertEquals(decodePacket(new Uint8Array(PACKET_BYTES + 1)), undefined);
+  assertEquals(decodePacket(new Uint8Array(SOUND_PACKET_BYTES - 1)), undefined);
+  assertEquals(decodePacket(new Uint8Array(SOUND_PACKET_BYTES + 1)), undefined);
   assertEquals(decodePacket(new Uint8Array(0)), undefined);
 });
 
@@ -152,7 +154,7 @@ Deno.test("encodePacket throws RangeError when data length is wrong", () => {
 
 Deno.test("an ack pins its exact bytes and round trips through a packet", () => {
   const runs = [{ start: 0x010203, length: 4 }, { start: 7, length: 255 }];
-  const data = encodeAck(runs, 0x0a0b0c);
+  const data = encodeAck(runs, 0x0a0b0c, DATA_BYTES);
   assertEquals(data.length, DATA_BYTES);
   assertEquals(
     [...data.subarray(0, 9)],
@@ -174,12 +176,37 @@ Deno.test("an ack pins its exact bytes and round trips through a packet", () => 
 
 Deno.test("decodeAck of all zeros is empty, and encodeAck rejects bad runs", () => {
   assertEquals(decodeAck(new Uint8Array(DATA_BYTES)), []);
-  assertEquals(decodeAck(encodeAck([])), []);
+  assertEquals(decodeAck(encodeAck([], 0, DATA_BYTES)), []);
   const full = Array.from({ length: 12 }, (_, i) => ({ start: i, length: 1 }));
-  assertEquals(decodeAck(encodeAck(full, 0xffffff)), full);
-  assertEquals(ackHeard(encodeAck(full, 0xffffff)), 0xffffff);
-  assertThrows(() => encodeAck([...full, { start: 0, length: 1 }]), RangeError);
-  assertThrows(() => encodeAck([{ start: 0, length: 0 }]), RangeError);
-  assertThrows(() => encodeAck([{ start: 0, length: 256 }]), RangeError);
-  assertThrows(() => encodeAck([{ start: MAX_K + 1, length: 1 }]), RangeError);
+  assertEquals(decodeAck(encodeAck(full, 0xffffff, DATA_BYTES)), full);
+  assertEquals(ackHeard(encodeAck(full, 0xffffff, DATA_BYTES)), 0xffffff);
+  assertThrows(
+    () => encodeAck([...full, { start: 0, length: 1 }], 0, DATA_BYTES),
+    RangeError,
+  );
+  assertThrows(
+    () => encodeAck([{ start: 0, length: 0 }], 0, DATA_BYTES),
+    RangeError,
+  );
+  assertThrows(
+    () => encodeAck([{ start: 0, length: 256 }], 0, DATA_BYTES),
+    RangeError,
+  );
+  assertThrows(
+    () => encodeAck([{ start: MAX_K + 1, length: 1 }], 0, DATA_BYTES),
+    RangeError,
+  );
+});
+
+Deno.test("a 128-byte packet round trips", () => {
+  const packet: Packet = {
+    type: PacketType.Data,
+    transferId: 7,
+    k: 3,
+    symbolId: 2,
+    data: new Uint8Array(117).map((_, i) => i),
+  };
+  const bytes = encodePacket(packet);
+  assertEquals(bytes.length, 128);
+  assertEquals(decodePacket(bytes), packet);
 });

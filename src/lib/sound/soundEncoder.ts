@@ -1,4 +1,4 @@
-import { PACKET_BYTES, SOUND_SAMPLE_RATE } from "@/lib/protocol.ts";
+import { SOUND_PACKET_BYTES, SOUND_SAMPLE_RATE } from "@/lib/protocol.ts";
 import type { QuietModule } from "../../../types/quiet.d.ts";
 import {
   type GgwaveInstance,
@@ -62,9 +62,9 @@ export class SoundEncoder {
   }
 
   encode(packet: Uint8Array): Float32Array<ArrayBuffer> {
-    if (packet.length !== PACKET_BYTES) {
+    if (packet.length !== SOUND_PACKET_BYTES) {
       throw new RangeError(
-        `packet must be ${PACKET_BYTES} bytes, got ${packet.length}`,
+        `packet must be ${SOUND_PACKET_BYTES} bytes, got ${packet.length}`,
       );
     }
     if (isQuietProtocol(this.#protocol)) {

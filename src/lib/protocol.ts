@@ -3,10 +3,15 @@ import type { SoundProtocol } from "./sound/ggwave.ts";
 export const PROTOCOL_VERSION = 3;
 
 /** Packet layout: version 4b | type 4b | transferId 16b | k 24b | symbolId 24b | data | crc16. */
-export const PACKET_BYTES = 64;
+export const SOUND_PACKET_BYTES = 64;
+export const QR_PACKET_BYTES = 64;
 export const PACKET_HEADER_BYTES = 9;
 export const PACKET_CRC_BYTES = 2;
-export const DATA_BYTES = PACKET_BYTES - PACKET_HEADER_BYTES - PACKET_CRC_BYTES;
+
+/** Data bytes in a packet of `packetBytes` for a transfer of `k` blocks. */
+export function dataBytes(packetBytes: number, _k: number): number {
+  return packetBytes - PACKET_HEADER_BYTES - PACKET_CRC_BYTES;
+}
 
 /** Up to this many blocks, repair symbols are dense random rows instead of LT. */
 export const DENSE_MAX_K = 128;

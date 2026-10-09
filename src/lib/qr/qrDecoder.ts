@@ -1,5 +1,5 @@
 import decodeQR from "qr/decode.js";
-import { PACKET_BYTES } from "../protocol.ts";
+import { QR_PACKET_BYTES } from "../protocol.ts";
 import { bytesToText, textToBytes } from "./bytesAsText.ts";
 
 /** RGBA pixels, the same shape as a DOM ImageData. */
@@ -18,10 +18,10 @@ export function decodeQrPackets(image: RgbaImage): Uint8Array[] {
     return [];
   }
   const bytes = textToBytes(text);
-  if (bytes.length === 0 || bytes.length % PACKET_BYTES !== 0) return [];
+  if (bytes.length === 0 || bytes.length % QR_PACKET_BYTES !== 0) return [];
   const packets: Uint8Array[] = [];
-  for (let i = 0; i < bytes.length; i += PACKET_BYTES) {
-    packets.push(bytes.slice(i, i + PACKET_BYTES));
+  for (let i = 0; i < bytes.length; i += QR_PACKET_BYTES) {
+    packets.push(bytes.slice(i, i + QR_PACKET_BYTES));
   }
   return packets;
 }

@@ -2,14 +2,14 @@
 // receiver must derive identical block sets from (transferId, symbolId, k)
 // forever, on every JS engine. Math.log and Math.sqrt are not guaranteed
 // bit-identical across engines, so ln and sqrt are built from + - * / only.
-import { DATA_BYTES, DENSE_MAX_K } from "../protocol.ts";
+import { dataBytes, DENSE_MAX_K } from "../protocol.ts";
 
 const C = 0.1;
 const DELTA = 0.5;
 const LN2 = 0.6931471805599453;
 
-export function blockCount(byteLength: number): number {
-  return Math.max(1, Math.ceil(byteLength / DATA_BYTES));
+export function blockCount(byteLength: number, packetBytes: number): number {
+  return Math.max(1, Math.ceil(byteLength / dataBytes(packetBytes, 0)));
 }
 
 export function blockSet(

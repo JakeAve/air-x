@@ -8,7 +8,7 @@ import type {
 } from "../../../types/ggwave.d.ts";
 import type { QuietProtocol } from "./quiet.ts";
 import {
-  PACKET_BYTES,
+  SOUND_PACKET_BYTES,
   SOUND_SAMPLE_RATE,
   SOUND_SAMPLES_PER_BLOCK,
 } from "@/lib/protocol.ts";
@@ -48,7 +48,7 @@ export function packetParameters(
 ): GgwaveParameters {
   return {
     ...g.getDefaultParameters(),
-    payloadLength: PACKET_BYTES,
+    payloadLength: SOUND_PACKET_BYTES,
     sampleRateInp: deviceSampleRate,
     sampleRateOut: deviceSampleRate,
     sampleRate: SOUND_SAMPLE_RATE,

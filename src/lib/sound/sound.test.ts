@@ -2,7 +2,13 @@ import { assert, assertEquals, assertThrows } from "@std/assert";
 import { SoundEncoder } from "./soundEncoder.ts";
 import { SoundDecoder } from "./soundDecoder.ts";
 import { decodePacket, encodePacket, PacketType } from "@/lib/packet.ts";
-import { DATA_BYTES, PACKET_BYTES, SOUND_SAMPLE_RATE } from "@/lib/protocol.ts";
+import {
+  dataBytes,
+  SOUND_PACKET_BYTES,
+  SOUND_SAMPLE_RATE,
+} from "@/lib/protocol.ts";
+
+const DATA_BYTES = dataBytes(SOUND_PACKET_BYTES, 0);
 import { PACKET_SECONDS, type SoundProtocol } from "./ggwave.ts";
 
 function mulberry32(seed: number): () => number {
@@ -110,7 +116,7 @@ Deno.test("PACKET_SECONDS matches measured encode duration within 2%", async () 
 Deno.test("encoder rejects packets of the wrong size", async () => {
   const encoder = await SoundEncoder.create();
   assertThrows(
-    () => encoder.encode(new Uint8Array(PACKET_BYTES - 1)),
+    () => encoder.encode(new Uint8Array(SOUND_PACKET_BYTES - 1)),
     RangeError,
   );
   encoder.dispose();

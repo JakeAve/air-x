@@ -3,7 +3,9 @@ import { sleep } from "./abort.ts";
 import { encodeBundle, type Item } from "./bundle.ts";
 import type { PacketChannel, PacketDisplay, PacketSource } from "./channel.ts";
 import { Encoder } from "./fountain/encoder.ts";
-import { DENSE_MAX_K } from "./protocol.ts";
+import { dataBytes, DENSE_MAX_K, SOUND_PACKET_BYTES } from "./protocol.ts";
+
+const DATA_BYTES = dataBytes(SOUND_PACKET_BYTES, 0);
 import {
   ackHeard,
   decodeAck,
@@ -293,8 +295,10 @@ Deno.test("foreign transfers and corrupt bytes are counted and ignored", async (
     onProgress: (p) => last = p,
   });
 
-  const foreign = new Encoder(bundle, 0).next();
-  const corrupt = encodePacket(new Encoder(bundle, 1).next());
+  const foreign = new Encoder(bundle, 0, SOUND_PACKET_BYTES).next();
+  const corrupt = encodePacket(
+    new Encoder(bundle, 1, SOUND_PACKET_BYTES).next(),
+  );
   corrupt[20] ^= 0xff;
   await air.party().send(
     [encodePacket(foreign), corrupt, new Uint8Array(10)],
@@ -414,7 +418,7 @@ Deno.test("an Ack queues its blocks ahead of fresh symbols", async () => {
         transferId: p.transferId,
         k: p.k,
         symbolId: 0,
-        data: encodeAck([{ start: 2, length: 3 }]),
+        data: encodeAck([{ start: 2, length: 3 }], 0, DATA_BYTES),
       }));
     },
   });
@@ -750,7 +754,7 @@ async function adaptiveSend(
         transferId: p.transferId,
         k: p.k,
         symbolId: ack[0],
-        data: encodeAck([], ack[1]),
+        data: encodeAck([], ack[1], DATA_BYTES),
       }));
     },
   });

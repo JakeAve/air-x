@@ -26,7 +26,20 @@ deno task build   # build to dist/
 deno task e2e     # build, then headless-Chromium receive test: sound-only via fake mic (ggwave, then quiet), then QR-only via fake camera (needs Playwright's Chromium: `deno run -A npm:playwright install chromium`)
 ```
 
-`dev` serves HTTPS when `.certs/cert.pem` and `.certs/key.pem` exist (README).
+`dev` serves HTTPS with a certificate it makes with mkcert for the machine's
+current addresses, kept in the main checkout's `.certs/` and shared by every
+worktree; without mkcert or a certificate it serves http. It prints the
+addresses to open, serves mkcert's root certificate at `/rootCA.pem` for phones
+to install, and prints every device's page log, errors, and requests tagged with
+the device's address (injected at serve time, nothing in `dist/`). `/sw.js` is
+replaced by a worker that clears caches, so dev never serves a stale build.
+
+To test with someone's phone: run `PORT=<port> deno task dev` in the background
+from your worktree, give them the "from a phone" address it prints, and read the
+device's lines from the server's output instead of asking what the screen says.
+No line when they load the page means the phone is not reaching the server.
+`rejected N` with `sound 0, qr 0` means the two devices run different builds; a
+fresh port is a clean origin. README, "Testing on phones", has the rest.
 
 ## Layout
 

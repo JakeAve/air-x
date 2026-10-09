@@ -83,14 +83,12 @@ function positive(input: HTMLInputElement, fallback: number): number {
 const MAX_CELLS = 512;
 
 // Columns for `cells` tiles spread over a `w` by `h` box: about as wide as
-// tall for that box, preferring a count that fills the last row, and unless
-// the tiles `cover` the box with their spacing, never so few that square
-// tiles would overflow its height (32 columns max).
-function columns(cells: number, w: number, h: number, cover: boolean) {
+// tall for that box, preferring a count that fills the last row, and never so
+// few that square tiles would overflow its height (32 columns max).
+function columns(cells: number, w: number, h: number) {
   if (cells <= 8) return Math.max(1, cells);
   const target = Math.sqrt(cells * w / Math.max(1, h));
-  const fits = (c: number) =>
-    cover || c === 32 || Math.ceil(cells / c) * (w / c) <= h;
+  const fits = (c: number) => c === 32 || Math.ceil(cells / c) * (w / c) <= h;
   let best = 0;
   let bestScore = Infinity;
   for (let c = Math.ceil(target * 0.7); c <= 32; c++) {
@@ -103,24 +101,16 @@ function columns(cells: number, w: number, h: number, cover: boolean) {
   return best || 32;
 }
 
-// Standing alone the tiles are squares the columns size, bounded by the box.
-// With `cover` (over the camera) each tile is 80% of its slot and the spacing
-// spreads the field over the whole box.
-function gridReset(id: string, n: number, w: number, h: number, cover = false) {
+// The tiles are squares the columns size, bounded by the box.
+function gridReset(id: string, n: number, w: number, h: number) {
   const el = $(id);
   el.hidden = false;
   const per = Math.ceil(n / MAX_CELLS);
   const cells = Math.ceil(n / per);
   el.dataset.per = String(per);
-  const cols = columns(cells, w, h, cover);
+  const cols = columns(cells, w, h);
   el.style.setProperty("--cols", String(cols));
   el.style.setProperty("--cell-gap", cols <= 16 ? "0.25rem" : "0.125rem");
-  if (cover) {
-    const rows = Math.ceil(cells / cols);
-    const px = Math.min(w / cols, h / rows) * 0.8;
-    const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
-    el.style.setProperty("--cell", `${(px / rem).toFixed(3)}rem`);
-  }
   el.replaceChildren(
     ...Array.from({ length: cells }, () => document.createElement("i")),
   );
@@ -582,22 +572,12 @@ listenButton.addEventListener("click", async () => {
         if (t) {
           if (t.transferId !== shown) {
             shown = t.transferId;
-            if (preview.hidden) {
-              gridReset(
-                "rx-grid",
-                t.k,
-                $("rx-grid").clientWidth,
-                innerHeight / 2,
-              );
-            } else {
-              gridReset(
-                "rx-grid",
-                t.k,
-                preview.clientWidth,
-                preview.clientHeight,
-                true,
-              );
-            }
+            gridReset(
+              "rx-grid",
+              t.k,
+              $("rx-grid").clientWidth,
+              innerHeight / 2,
+            );
           }
           gridPaint("rx-grid", t.states());
           show("rx-count", `${t.resolved} of ${t.k} blocks`);

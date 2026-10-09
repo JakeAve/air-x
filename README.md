@@ -77,7 +77,7 @@ Each device has to trust mkcert's root certificate once:
 The root certificate is public; its key never leaves `mkcert -CAROOT`.
 
 Then open the printed address on two devices. Tap Send on one, type text or pick
-files, and press Send; tap Receive on the other and press Listen. Send by picks
+files, and press Send; tap Receive on the other and press Receive. Send by picks
 QR or sound (it defaults to sound for bundles up to 2 KB, else QR) and the line
 under it estimates how long each would take. Tuning inputs live under Advanced
 on each screen, and Start over in the top strip returns to the first screen.
@@ -113,7 +113,7 @@ This is added by the dev server as it serves each page. None of it is in
 
 ### QR between two phones
 
-1. On the receiver, leave Scan QR with camera on and press Listen. The rear
+1. On the receiver, leave Scan QR with camera on and press Receive. The rear
    camera opens; use Flip camera under the preview if it shows your face.
 2. On the sender, turn screen brightness all the way up, type something, and
    press Send. The code fills the screen.

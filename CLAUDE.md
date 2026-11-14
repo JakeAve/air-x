@@ -34,9 +34,18 @@ to install, and prints every device's page log, errors, and requests tagged with
 the device's address (injected at serve time, nothing in `dist/`). `/sw.js` is
 replaced by a worker that clears caches, so dev never serves a stale build.
 
-To test with someone's phone: run `PORT=<port> deno task dev` in the background
-from your worktree, give them the "from a phone" address it prints, and read the
-device's lines from the server's output instead of asking what the screen says.
+**Local development is always tested on a phone.** Mic, camera, speaker, and
+touch only behave for real there, so a desktop browser is never the check. For
+any change a page can show:
+
+1. Run `PORT=<port> deno task dev` in the background from your worktree, on a
+   free port from 8450 up (`lsof -i :<port>` is empty), one port per worktree.
+   Not `preview_start`: launch.json's `dev` serves whatever folder the session
+   is in on 8444, usually the main checkout, not your worktree.
+2. Give Jake the "from a phone" address it prints, with the port.
+3. Read the device's lines from the server's output instead of asking what the
+   screen says.
+
 No line when they load the page means the phone is not reaching the server.
 `rejected N` with `sound 0, qr 0` means the two devices run different builds; a
 fresh port is a clean origin. README, "Testing on phones", has the rest.
@@ -84,8 +93,8 @@ fresh port is a clean origin. README, "Testing on phones", has the rest.
 
 ## `src/lib/`
 
-The protocol layer. Spec: `docs/specs/2026-09-14-transfer-protocol.md` (local,
-gitignored).
+The protocol layer. Spec: the main checkout's
+`.claude/plans/2026-09-14-transfer-protocol/spec.md` (gitignored).
 
 - `protocol.ts` — wire constants: version, packet sizes, `MAX_K`,
   `COMPACT_MAX_K`, `dataBytes(packetBytes, k)` (a transfer's block size), and

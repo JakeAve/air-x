@@ -7,24 +7,17 @@ const ROOT = new URL("..", import.meta.url).pathname;
 const DIST = join(ROOT, "dist");
 
 async function bundle(entry: string, out: string) {
-  const cmd = new Deno.Command(Deno.execPath(), {
-    args: [
-      "bundle",
-      "--platform",
-      "browser",
-      "--minify",
-      "--sourcemap",
-      "linked",
-      "-o",
-      out,
-      entry,
-    ],
-    cwd: ROOT,
-    stdout: "inherit",
-    stderr: "inherit",
+  // Deno.bundle, not `deno bundle`: the 2.9.7 CLI fails with "No such file or
+  // directory" whenever --sourcemap is set.
+  const result = await Deno.bundle({
+    entrypoints: [join(ROOT, entry)],
+    outputPath: out,
+    platform: "browser",
+    minify: true,
+    sourcemap: "linked",
   });
-  const { success } = await cmd.output();
-  if (!success) throw new Error(`bundle failed for ${entry}`);
+  for (const e of result.errors) console.error(e.text);
+  if (!result.success) throw new Error(`bundle failed for ${entry}`);
 }
 
 const ENTRIES: [entry: string, out: string][] = [

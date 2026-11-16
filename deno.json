@@ -27,7 +27,8 @@
       "dom.iterable",
       "dom.asynciterable",
       "esnext",
-      "deno.ns"
+      "deno.ns",
+      "deno.unstable"
     ]
   },
   "lint": {
@@ -47,6 +48,7 @@
     ".worktrees/"
   ],
   "nodeModulesDir": "auto",
+  "unstable": ["bundle"],
   "fmt": {
     "exclude": [
       "vendor/"

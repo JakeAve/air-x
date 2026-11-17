@@ -119,6 +119,12 @@ home opens with the strip (`.strip`: app title left, `Start over` link to
 label and `.primary`, and the title moves through present participle and past
 tense (`send`, `sending`, `sent`).
 
+Motion: each direct child of a shown `.screen` swings in from its left edge
+(`@keyframes enter`, staggered by `nth-child`), so a screen change or a form/run
+swap animates with no JS; home's tiles fold in one by one with `land`.
+`#receive-run` only fades: a transform on it would pin the fixed camera video to
+it. All of it is off under reduced motion.
+
 To add a screen: a section with the strip and `h1`, an entry in `SCREENS`, and a
 tile or link to `#<name>`. Ids must be unique across the whole document; a
 button never shares an id with its section.

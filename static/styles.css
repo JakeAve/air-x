@@ -449,8 +449,65 @@ main[data-screen="home"] .log {
   }
 }
 
+/* Page entrance, the WP7 turnstile: a screen's blocks swing in from the left
+   edge one after another. Showing an element restarts its animation, so this
+   runs on every screen change and every form/run swap with no JS. */
+.screen > * {
+  transform-origin: left center;
+  animation: enter 0.35s cubic-bezier(0.1, 0.9, 0.2, 1) backwards;
+}
+
+.screen > :nth-child(2) {
+  animation-delay: 0.04s;
+}
+
+.screen > :nth-child(3) {
+  animation-delay: 0.08s;
+}
+
+.screen > :nth-child(n + 4) {
+  animation-delay: 0.12s;
+}
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: perspective(60rem) rotateY(-40deg) translateX(1.5rem);
+  }
+}
+
+/* Start screen tiles fold in from their left edge, one by one. */
+.screen > .tiles {
+  animation: none;
+}
+
+.tile {
+  transform-origin: left center;
+  animation: land 0.45s cubic-bezier(0.1, 0.9, 0.2, 1) backwards;
+  animation-delay: 0.12s;
+}
+
+.tile:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+/* The camera video inside is position: fixed, and a transformed ancestor
+   would pin it to the block instead of the viewport, so this one only fades. */
+#receive-run {
+  animation-name: fade;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .grid i {
+  .grid i,
+  .screen > *,
+  #receive-run,
+  .tile {
     animation: none;
   }
 }

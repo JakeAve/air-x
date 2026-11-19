@@ -30,6 +30,7 @@ const sendRun = $<HTMLDivElement>("send-run");
 const sendTitle = $<HTMLHeadingElement>("send-title");
 const sendText = $<HTMLTextAreaElement>("send-text");
 const sendFiles = $<HTMLInputElement>("send-files");
+const sendFilesClear = $<HTMLButtonElement>("send-files-clear");
 const sendEstimate = $<HTMLParagraphElement>("send-estimate");
 const packetsPerCodeInput = $<HTMLInputElement>("packets-per-code");
 const fpsInput = $<HTMLInputElement>("fps");
@@ -271,6 +272,7 @@ for (const radio of document.querySelectorAll('input[name="send-by"]')) {
 }
 
 function itemsChanged() {
+  sendFilesClear.hidden = !sendFiles.files?.length;
   clearTimeout(sizeTimer);
   sizeTimer = setTimeout(async () => {
     const run = ++sizing;
@@ -296,6 +298,10 @@ function itemsChanged() {
   }, 300);
 }
 sendForm.addEventListener("input", itemsChanged);
+sendFilesClear.addEventListener("click", () => {
+  sendFiles.value = "";
+  itemsChanged();
+});
 
 sendButton.addEventListener("click", async () => {
   if (running) {

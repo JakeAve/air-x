@@ -210,7 +210,7 @@ input[type="file"] {
 
 input[type="file"]::file-selector-button {
   min-height: 2.75rem;
-  margin-right: 0.75rem;
+  margin-right: 1rem;
   padding: 0.25rem 0.75rem;
   font: inherit;
   font-size: 1.125rem;
@@ -363,6 +363,23 @@ button.primary {
 button.primary:active {
   background: var(--accent-press);
   border-color: var(--accent-press);
+}
+
+/* A quiet secondary action: mango text, no frame. */
+button.text {
+  width: auto;
+  min-height: var(--touch);
+  justify-self: start;
+  padding: 0;
+  font-size: 1rem;
+  font-weight: 400;
+  color: var(--accent);
+  border: 0;
+}
+
+button.text:active {
+  color: var(--accent-press);
+  background: transparent;
 }
 
 button:disabled {

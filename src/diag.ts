@@ -454,15 +454,69 @@ function renderItem(item: Item) {
   const link = document.createElement("a");
   link.href = url;
   link.download = item.name;
-  link.textContent = "Download";
-  meta.append(name, link);
+  setIcon(link, "Download");
+  meta.append(name);
+  const isText = item.type.startsWith("text/");
+  if (isText || item.type.startsWith("image/")) {
+    meta.append(copyLink(blob, isText));
+  }
+  meta.append(link);
   li.append(meta);
-  if (item.type.startsWith("text/")) {
+  if (isText) {
     const text = document.createElement("pre");
     text.textContent = new TextDecoder().decode(item.bytes);
     li.append(text);
   }
   receivedItems.append(li);
+}
+
+// The clipboard takes text, and images only as PNG, so other images are redrawn as PNG.
+function copyLink(blob: Blob, isText: boolean) {
+  const copy = document.createElement("a");
+  copy.href = "#";
+  copy.role = "button";
+  setIcon(copy, "Copy");
+  copy.addEventListener("click", async (event) => {
+    event.preventDefault();
+    try {
+      // iOS only allows the write inside the tap, so the PNG goes in as a promise.
+      await navigator.clipboard.write([
+        new ClipboardItem(
+          isText ? { "text/plain": blob.text() } : { "image/png": png(blob) },
+        ),
+      ]);
+      setIcon(copy, "Copied");
+    } catch (err) {
+      log(`copy failed: ${err}`);
+      setIcon(copy, "Copy failed");
+    }
+    setTimeout(() => setIcon(copy, "Copy"), 2000);
+  });
+  return copy;
+}
+
+const ICONS = {
+  Copy: "M8 8h12v12H8zM16 8V4H4v12h4",
+  Copied: "M5 12l5 5 9-10",
+  "Copy failed": "M6 6l12 12M18 6L6 18",
+  Download: "M12 4v11M7 10l5 5 5-5M5 20h14",
+};
+
+// Icons on a 24 grid like the tiles'; the label is what a screen reader says.
+function setIcon(link: HTMLAnchorElement, label: keyof typeof ICONS) {
+  link.ariaLabel = label;
+  link.title = label;
+  link.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${
+    ICONS[label]
+  }"/></svg>`;
+}
+
+async function png(blob: Blob) {
+  if (blob.type === "image/png") return blob;
+  const bitmap = await createImageBitmap(blob);
+  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
+  return canvas.convertToBlob();
 }
 
 let scanningQr = false;

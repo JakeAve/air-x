@@ -535,21 +535,40 @@ main[data-screen="home"] .log {
 
 .items .meta {
   display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
+  align-items: center;
+  gap: 0.25rem;
   font-size: 0.875rem;
   color: var(--label);
 }
 
-/* A long file name wraps instead of pushing Download off the card. */
+/* A long file name wraps instead of pushing Copy and Download off the card. */
 .items .meta span {
+  flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.items a {
+/* Icon links: a 2.75rem target pulled into the card's padding so the row stays one line tall. */
+.items .meta a {
   flex: none;
-  font-weight: 600;
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  margin-block: -0.625rem;
+}
+
+.items .meta a:last-child {
+  margin-inline-end: -0.625rem;
+}
+
+.items .meta svg {
+  width: 1.5rem;
+  height: 1.5rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: square;
 }
 
 pre {

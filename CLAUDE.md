@@ -66,7 +66,9 @@ fresh port is a clean origin. README, "Testing on phones", has the rest.
   `og.png` (1200x630 social card). The PNGs are rendered from the SVG and the
   site font by `deno run -A scripts/og.ts`; re-run it after a brand change.
   Every asset path is relative except the absolute `og:image` and canonical
-  URLs, which point at the Pages site. Visual rules live in
+  URLs, which point at the Pages site. The accent is an animated gradient
+  (`--accent-grad`); `scripts/grad-editor.local.js`, gitignored, is a panel for
+  tuning it that `dev` inlines when present. Visual rules live in
   `.claude/skills/air-x-style/SKILL.md`; read it before touching markup or CSS.
 - `src/diag.ts` — the page: three screens picked by the hash (`#home`, `#send`,
   `#receive`; leaving a screen aborts its transfer). Send text and files by QR

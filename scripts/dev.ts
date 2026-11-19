@@ -9,7 +9,9 @@
 // A phone's log is out of reach, so every HTML page is served with
 // DEV_LOG_SCRIPT appended: it posts each new line of the page's #log, plus
 // uncaught errors, to /__log, which prints them here tagged with the device's
-// address. None of it is in dist/, so none of it ships.
+// address. None of it is in dist/, so none of it ships. If the gitignored
+// scripts/grad-editor.local.js exists, it is inlined too: a panel for tuning
+// the accent gradient.
 //
 // The real service worker is cache-first, so a device that ever cached this
 // origin would keep running an old build. /sw.js is served as DEV_SW instead:
@@ -90,9 +92,12 @@ async function handle(req: Request, info: Deno.ServeHandlerInfo) {
   if (
     res.status !== 200 || !res.headers.get("content-type")?.includes("html")
   ) return res;
+  const editor = await Deno.readTextFile(
+    join(ROOT, "scripts/grad-editor.local.js"),
+  ).then((js) => `<script type="module">${js}</script>`, () => "");
   const html = (await res.text()).replace(
     "</body>",
-    DEV_LOG_SCRIPT + "</body>",
+    DEV_LOG_SCRIPT + editor + "</body>",
   );
   return new Response(html, {
     headers: {

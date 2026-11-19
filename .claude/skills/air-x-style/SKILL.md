@@ -1,35 +1,47 @@
 ---
 name: air-x-style
-description: Use before touching any markup or CSS in Air X (static/diag.html, static/styles.css) or adding a screen or control. Metro, 2026: black, flat, typographic, square corners, one mango accent, every size in rem. Covers tokens, type scale, spacing, control anatomy, the hash-picked screen pattern, and what is off-limits.
+description: Use before touching any markup or CSS in Air X (static/diag.html, static/styles.css) or adding a screen or control. Metro, 2026: black, flat, typographic, square corners, one slowly turning amber-to-red accent gradient, every size in rem. Covers tokens, type scale, spacing, control anatomy, the hash-picked screen pattern, and what is off-limits.
 ---
 
 # Air X style
 
 Windows Phone 7 Metro, brought to 2026. Flat and typographic: black ground,
-white type, one mango accent, square corners, no decoration. Every rule below
-already lives in `static/styles.css`; extend it, do not fork it.
+white type, one accent, square corners, no decoration. The accent is a gradient
+(`--accent-grad`) that turns and trades its stops over three minutes. Every rule
+below already lives in `static/styles.css`; extend it, do not fork it.
 
 ## Tokens (`:root` in styles.css)
 
-| Token                    | Value               | Use                                                                                          |
-| ------------------------ | ------------------- | -------------------------------------------------------------------------------------------- |
-| `--bg`                   | `#000000`           | page ground                                                                                  |
-| `--ink`                  | `#ffffff`           | text, outline buttons, radio ring when checked                                               |
-| `--surface`              | `#141414`           | input fills, item cards, unlit grid tiles                                                    |
-| `--surface-2`            | `#1a1a1a`           | camera preview                                                                               |
-| `--scrim`                | black at 55%        | bands behind the UI laid over the camera                                                     |
-| `--hairline`             | `#2a2a2a`           | 1px dividers (`<hr>`), card edges                                                            |
-| `--border`               | `#4d4d4d`           | 2px input borders at rest, unchecked radio ring, switch track off                            |
-| `--muted`                | `#9a9a9a`           | secondary text, estimates, elapsed time                                                      |
-| `--label`                | `#c2c2c2`           | field labels, lede, item meta                                                                |
-| `--accent`               | `#ffa31a`           | mango: tiles, primary button, links, expander summaries, radio dot, switch on, lit grid cell |
-| `--accent-press`         | `#d98400`           | pressed tile and primary button                                                              |
-| `--b1` / `--b2` / `--b3` | 1 / 2 / 3 px in rem | hairline / input and radio / button and file chooser                                         |
-| `--gap`                  | `1.5rem`            | page margin (WP7's 24px) and rhythm between sections                                         |
-| `--touch`                | `3rem`              | minimum control height                                                                       |
+| Token                    | Value                                          | Use                                                                                        |
+| ------------------------ | ---------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `--bg`                   | `#000000`                                      | page ground                                                                                |
+| `--ink`                  | `#ffffff`                                      | text, outline buttons, radio ring when checked                                             |
+| `--surface`              | `#141414`                                      | input fills, item cards, unlit grid tiles                                                  |
+| `--surface-2`            | `#1a1a1a`                                      | camera preview                                                                             |
+| `--scrim`                | black at 55%                                   | bands behind the UI laid over the camera                                                   |
+| `--hairline`             | `#2a2a2a`                                      | 1px dividers (`<hr>`), card edges                                                          |
+| `--border`               | `#4d4d4d`                                      | 2px input borders at rest, unchecked radio ring, switch track off                          |
+| `--muted`                | `#9a9a9a`                                      | secondary text, estimates, elapsed time                                                    |
+| `--label`                | `#c2c2c2`                                      | field labels, lede, item meta                                                              |
+| `--accent`               | `#ffa31a`                                      | solid mango: lit and outlined grid cells, input focus border                               |
+| `--accent-press`         | `#d98400`                                      | solid fallback where a gradient cannot go                                                  |
+| `--accent-grad`          | amber `--g1` to red `--g3` at `--accent-angle` | tiles, primary button, switch on, radio dot, `h1`, links, text buttons, expander summaries |
+| `--b1` / `--b2` / `--b3` | 1 / 2 / 3 px in rem                            | hairline / input and radio / button and file chooser                                       |
+| `--gap`                  | `1.5rem`                                       | page margin (WP7's 24px) and rhythm between sections                                       |
+| `--touch`                | `3rem`                                         | minimum control height                                                                     |
 
-One accent. Never introduce a second hue, a gradient, a shadow, a blur, or a
-border radius. Only the QR canvas is white.
+One accent, painted with `--accent-grad`: fills use it as `background`, text
+uses it with `background-clip: text` and `color: transparent`, borders with
+`border-image`. `:root` animates `--accent-angle` (`accent-spin`) and swaps
+`--g1`..`--g3` (`accent-cycle`), both 180 s, off under reduced motion; the three
+are `@property`-registered so they can animate. Pressed accent controls take
+`filter: brightness(0.85)`. The progress grid, the input focus border, and the
+outlined state still use solid `--accent`. Never introduce another gradient, a
+shadow, a blur, or a border radius. Only the QR canvas is white.
+
+To tune it, put the gradient editor at `scripts/grad-editor.local.js`
+(gitignored); `deno task dev` inlines it into every page as a fixed panel whose
+Copy CSS output is the block to paste into `styles.css`.
 
 ## Type
 
@@ -69,23 +81,25 @@ inside a `.stack` sit 1rem apart; label to control is 0.5rem; two-up `.row` and
 - **File input**: bare, with `::file-selector-button` styled as an outline
   button (`--b3` white border, 600 weight).
 - **Buttons**: full width, 3.25rem tall, `--b3` white border on transparent,
-  1.25rem 600. `:active` inverts to white on black. `.primary` is mango fill
-  with black text, pressed `--accent-press`. One primary per screen, and it is
+  1.25rem 600. `:active` inverts to white on black. `.primary` is gradient fill
+  with black text, pressed at 85% brightness. One primary per screen, and it is
   the same element that turns into Stop while a transfer runs (drop `.primary`
   and change the label; never add a second button).
 - **Radios** (`.choices`): `appearance: none`, 1.625rem ring with `--b2` border;
-  checked gets a white ring and a mango dot from a radial gradient. The label
-  row is 2.75rem tall; the checked row's text is `--ink`, the rest `--label`.
+  checked gets a white ring and a gradient dot (a radial mask over
+  `--accent-grad`). The label row is 2.75rem tall; the checked row's text is
+  `--ink`, the rest `--label`.
 - **Switch** (`.switch`): the WP7 slab. Label left, state word (`On`/`Off` from
   CSS `content`) and a 4.5rem by 0.75rem track right; the thumb is a 1.5rem by
-  1.75rem white block that overhangs the track. On = mango track, thumb right.
-  Use for a boolean that changes behaviour; use radios for a choice of three.
-- **Expander** (`details > summary`): mango text with a rotated-border chevron,
-  2.75rem tall. `.advanced` holds tuning inputs and is closed by default. `.log`
-  is muted and hidden on the home screen.
-- **Tiles** (`.tile`): square via `aspect-ratio`, mango fill, black stroke icon
-  2.5rem top-left, 1.25rem label bottom-left. Icons are inline SVG, stroke 1.5
-  on a 24 grid, square caps. Never emoji or glyph fonts.
+  1.75rem white block that overhangs the track. On = gradient track, thumb
+  right. Use for a boolean that changes behaviour; use radios for a choice of
+  three.
+- **Expander** (`details > summary`): gradient text with a rotated-border
+  chevron (`border-image`), 2.75rem tall. `.advanced` holds tuning inputs and is
+  closed by default. `.log` is muted and hidden on the home screen.
+- **Tiles** (`.tile`): square via `aspect-ratio`, gradient fill, black stroke
+  icon 2.5rem top-left, 1.25rem label bottom-left. Icons are inline SVG, stroke
+  1.5 on a 24 grid, square caps. Never emoji or glyph fonts.
 - **Progress**: a `.grid` of square `<i>` tiles, one per block when receiving or
   per expected packet when sending (at most 512; past that each stands for a
   run). JS gives the grid a box to spread over and sets `--cols` from it: one
@@ -131,7 +145,7 @@ button never shares an id with its section.
 
 ## Off-limits
 
-Rounded corners, gradients, shadows, blur, emoji, icon fonts, external CSS or
-font hosts, px values in CSS (rem only; the root is the single px), a second
-accent, counters that duplicate the log, and any button that is not the screen's
-one action or a camera flip.
+Rounded corners, gradients other than `--accent-grad`, shadows, blur, emoji,
+icon fonts, external CSS or font hosts, px values in CSS (rem only; the root is
+the single px), a second accent, counters that duplicate the log, and any button
+that is not the screen's one action or a camera flip.

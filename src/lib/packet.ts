@@ -132,11 +132,19 @@ export interface Run {
 
 const ACK_HEARD_OFFSET = ACK_RUNS * ACK_RUN_BYTES;
 
-/** Packs runs as `start u24 | length u8` each, zero padding ending the list, then `heard` as a u24. `length` is the data size of the packet carrying it. */
+const ACK_SHARE_OFFSET = ACK_HEARD_OFFSET + 3;
+
+/**
+ * Packs runs as `start u24 | length u8` each, zero padding ending the list,
+ * then `heard` as a u24, then `share` (fresh ids heard since the last ack,
+ * counted from the first id seen, 0 to 1) as 1 + percent in a u8, 0 when
+ * unknown. `length` is the data size of the packet carrying it.
+ */
 export function encodeAck(
   runs: Run[],
   heard: number,
   length: number,
+  share?: number,
 ): Uint8Array {
   if (runs.length > ACK_RUNS) {
     throw new RangeError(`${runs.length} runs, at most ${ACK_RUNS}`);
@@ -146,6 +154,10 @@ export function encodeAck(
   data[ACK_HEARD_OFFSET] = (heard >> 16) & 0xff;
   data[ACK_HEARD_OFFSET + 1] = (heard >> 8) & 0xff;
   data[ACK_HEARD_OFFSET + 2] = heard & 0xff;
+  if (share !== undefined) {
+    data[ACK_SHARE_OFFSET] = 1 +
+      Math.round(Math.max(0, Math.min(1, share)) * 100);
+  }
   runs.forEach(({ start, length }, i) => {
     assertRange(start, MAX_K, "start");
     if (length < 1) throw new RangeError(`length ${length} out of range`);
@@ -163,6 +175,13 @@ export function encodeAck(
 export function ackHeard(data: Uint8Array): number {
   return (data[ACK_HEARD_OFFSET] << 16) | (data[ACK_HEARD_OFFSET + 1] << 8) |
     data[ACK_HEARD_OFFSET + 2];
+}
+
+/** The share heard an ack carries, undefined when it had none. */
+export function ackShare(data: Uint8Array): number | undefined {
+  return data[ACK_SHARE_OFFSET]
+    ? (data[ACK_SHARE_OFFSET] - 1) / 100
+    : undefined;
 }
 
 export function decodeAck(data: Uint8Array): Run[] {

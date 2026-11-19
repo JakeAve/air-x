@@ -2,6 +2,7 @@ import { assertEquals, assertThrows } from "@std/assert";
 import { crc16 } from "./crc16.ts";
 import {
   ackHeard,
+  ackShare,
   decodeAck,
   decodePacket,
   encodeAck,
@@ -279,4 +280,12 @@ Deno.test("a Done packet with k 0 is compact", () => {
   });
   assertEquals([...bytes.subarray(0, 6)], [0x42, 0xab, 0xcd, 0, 0, 0]);
   assertEquals(decodePacket(bytes)?.type, PacketType.Done);
+});
+
+Deno.test("an ack carries share in percent after heard, 0 meaning none", () => {
+  assertEquals(ackShare(encodeAck([], 5, DATA_BYTES)), undefined);
+  const data = encodeAck([], 5, DATA_BYTES, 0.786);
+  assertEquals(ackShare(data), 0.79);
+  assertEquals(ackShare(encodeAck([], 5, 53, 0)), 0);
+  assertEquals(ackHeard(data), 5);
 });

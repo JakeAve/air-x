@@ -4,13 +4,18 @@ export interface QrRate {
   fps: number;
 }
 
-/** What a sender learned about a stretch of fresh symbols, all shown at `rate`. */
+/** One ack's worth of what the receiver saw, all at `rate` as far as the sender knows. */
 export interface RateSample {
   rate: QrRate;
-  /** Fresh symbols shown in the stretch. */
-  sent: number;
-  /** How many of them the receiver heard; undefined when no report came back. */
-  heard: number | undefined;
+  /**
+   * Share of fresh symbols the receiver heard since its last ack, counted
+   * from the first id it saw to the highest: 0 to 1. Measured on the
+   * receiver, so when it started looking does not matter. Undefined when
+   * the ack had no figure, or on silence.
+   */
+  heard?: number;
+  /** `silentAfter` fresh symbols went out with no ack: nothing is known. */
+  silent?: boolean;
 }
 
 /**
@@ -66,9 +71,10 @@ export function ladderPolicy(options: Partial<LadderOptions> = {}): RatePolicy {
   /** Packets per second of the rate last stepped down from, off limits while `wait` lasts. */
   let failed = Infinity;
   let wait = 0;
-  return ({ rate, sent, heard }) => {
+  return ({ rate, heard, silent }) => {
     const now = perSecond(rate);
-    const share = heard === undefined ? 0 : heard / sent;
+    if (heard === undefined && !silent) return rate;
+    const share = heard ?? 0;
     if (wait > 0) wait--;
     if (share < lowerBelow) {
       const down = ladder.findLast((step) => perSecond(step) < now);

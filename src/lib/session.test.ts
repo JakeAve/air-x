@@ -8,6 +8,7 @@ import { dataBytes, DENSE_MAX_K, SOUND_PACKET_BYTES } from "./protocol.ts";
 const DATA_BYTES = dataBytes(SOUND_PACKET_BYTES, 0);
 import {
   ackHeard,
+  ackShare,
   decodeAck,
   decodePacket,
   encodeAck,
@@ -683,6 +684,7 @@ Deno.test("a QR receiver's acks report the highest id and fresh symbols heard, n
   const display = new Display({ seed: 16, dropCodes: [1] });
   const stop = new AbortController();
   const acks: { highest: number; heard: number; runs: Run[] }[] = [];
+  const shares: (number | undefined)[] = [];
   const listen = air.party();
   listen.onPacket((bytes) => {
     const packet = decodePacket(bytes)!;
@@ -692,6 +694,7 @@ Deno.test("a QR receiver's acks report the highest id and fresh symbols heard, n
       heard: ackHeard(packet.data),
       runs: decodeAck(packet.data),
     });
+    shares.push(ackShare(packet.data));
     if (acks.length === 2) stop.abort();
   });
 
@@ -713,12 +716,46 @@ Deno.test("a QR receiver's acks report the highest id and fresh symbols heard, n
     { highest: 3, heard: 4, runs: [] },
     { highest: 11, heard: 8, runs: [] },
   ]);
+  // Ids 0..3 all heard; 4..11 lost code 1, so 4 of 8.
+  assertEquals(shares, [1, 0.5]);
 });
 
-/** Runs a QR send, answering the i-th code with `acks[i]` as [highest, heard], and stops after `codes` codes. */
+Deno.test("a receiver that starts looking late measures its share from the first id it saw", async () => {
+  const bundle = await encodeBundle(testItems(2_000));
+  const air = new Air({ seed: 16 });
+  const display = new Display({ seed: 16, dropCodes: [0, 1, 2] });
+  const stop = new AbortController();
+  const shares: (number | undefined)[] = [];
+  const listen = air.party();
+  listen.onPacket((bytes) => {
+    const packet = decodePacket(bytes)!;
+    if (packet.type !== PacketType.Ack) return;
+    shares.push(ackShare(packet.data));
+    stop.abort();
+  });
+
+  const received = receiveBundle({
+    sound: air.party(),
+    sources: [display],
+    silenceMs: 60_000,
+    ackEvery: 4,
+    signal: stop.signal,
+  });
+  await sendBundle(bundle, {
+    listen,
+    qr: { display, packetsPerCode: 4, fps: 20 },
+    signal: stop.signal,
+  });
+  await received;
+
+  // Codes 0..2 went unseen; ids 12..15 all heard is a full share, not 4 of 16.
+  assertEquals(shares, [1]);
+});
+
+/** Runs a QR send, answering the i-th code with an ack carrying `acks[i]`, and stops after `codes` codes. */
 async function adaptiveSend(
   codes: number,
-  acks: Record<number, [number, number]>,
+  acks: Record<number, { share?: number }>,
   silentAfter: number,
   policy: (sample: RateSample) => QrRate,
 ) {
@@ -753,45 +790,54 @@ async function adaptiveSend(
         type: PacketType.Ack,
         transferId: p.transferId,
         k: p.k,
-        symbolId: ack[0],
-        data: encodeAck([], ack[1], DATA_BYTES),
+        symbolId: 0,
+        data: encodeAck([], 0, DATA_BYTES, ack.share),
       }));
     },
   });
   return { samples, sizes };
 }
 
-Deno.test("an adaptive QR sender samples each stretch between acks and takes the policy's rate, up and down", async () => {
+Deno.test("an adaptive QR sender takes each ack's own figures as one sample", async () => {
   const at = (packetsPerCode: number) => ({ packetsPerCode, fps: 100 });
   const { samples, sizes } = await adaptiveSend(
-    5,
-    // Baseline, all 4 heard, 1 of 8 heard, then a stale ack that is ignored.
-    { 0: [3, 4], 1: [7, 8], 2: [15, 9], 3: [11, 99] },
+    4,
+    // A full share, a poor one, then an ack with no figures (no sample).
+    { 0: { share: 1 }, 1: { share: 0.25 }, 2: {} },
     1_000,
-    ({ sent, heard }) => at(heard === sent ? 8 : 2),
+    ({ heard }) => at(heard === 1 ? 8 : 2),
   );
 
   assertEquals(samples, [
-    { rate: at(4), sent: 4, heard: 4 },
-    { rate: at(8), sent: 8, heard: 1 },
+    { rate: at(4), heard: 1 },
+    { rate: at(8), heard: 0.25 },
   ]);
-  assertEquals(sizes, [4, 4, 8, 2, 2]);
+  assertEquals(sizes, [4, 8, 2, 2]);
 });
 
-Deno.test("an adaptive QR sender reports silence, and an ack spanning the rate change only sets the baseline", async () => {
+Deno.test("an adaptive QR sender reports silence only after an ack, and an ack restarts the count", async () => {
   const at = (packetsPerCode: number) => ({ packetsPerCode, fps: 100 });
   const { samples, sizes } = await adaptiveSend(
     6,
-    // Baseline; silence after 8 more symbols drops the rate at id 12; the ack
-    // at 13 covers ids 4..13 at two rates, the one at 15 covers 14..15.
-    { 0: [3, 4], 3: [13, 6], 4: [15, 8] },
+    // An empty ack after code 0 (no sample); silence 8 fresh later; then a
+    // full share after code 4.
+    { 0: {}, 4: { share: 1 } },
     8,
     () => at(2),
   );
 
   assertEquals(samples, [
-    { rate: at(4), sent: 8, heard: undefined },
-    { rate: at(2), sent: 2, heard: 2 },
+    { rate: at(4), silent: true },
+    { rate: at(2), heard: 1 },
   ]);
   assertEquals(sizes, [4, 4, 4, 2, 2, 2]);
+});
+
+Deno.test("an adaptive QR sender ignores silence before any ack: no one may be looking yet", async () => {
+  const { samples, sizes } = await adaptiveSend(6, {}, 8, () => {
+    throw new Error("no sample expected");
+  });
+
+  assertEquals(samples, []);
+  assertEquals(sizes, [4, 4, 4, 4, 4, 4]);
 });

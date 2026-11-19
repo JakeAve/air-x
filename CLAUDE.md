@@ -141,11 +141,12 @@ The protocol layer. Spec: the main checkout's
   resend is simply named again, and the sender ignores blocks already queued. A
   bundle that finishes inside the period never acks. Acks heard from other
   receivers count as neither symbols nor sound from the transfer. With
-  `qr.adapt`, the sender turns each pair of acks into a `RateSample` (fresh
-  symbols sent and heard at one rate) and uses the rate its `RatePolicy`
-  returns; the first ack, and one whose stretch spans a rate change, only set
-  the baseline, and `silentAfter` fresh symbols with no ack give a sample with
-  `heard` undefined.
+  `qr.adapt`, every ack carries the share of fresh ids the receiver heard since
+  its last ack, counted from just below the first id it saw, so a receiver that
+  starts looking late is not read as loss; the sender passes it to its
+  `RatePolicy` as a `RateSample` and uses the rate it returns. Once an ack has
+  been heard, `silentAfter` fresh symbols with no ack give a `silent` sample;
+  before the first ack, no one may be looking yet, so silence means nothing.
 - `rate.ts` — the decision engine, apart from the plumbing: `RatePolicy` is a
   function from a `RateSample` to the next `QrRate`. `ladderPolicy` is the one
   in use; its ladder (2 to 9 packets per code, 5 to 10 fps) and thresholds are
@@ -174,7 +175,9 @@ Wire facts (multi-byte fields big-endian):
   else the count at the wide size. A compact transfer's symbol ids stop at
   65535; a sender that reaches the last id starts again at 0. Types: `Data`,
   `DataListen`, `Done`, `Ack` (`symbolId` is the highest id heard; data is 12
-  runs of `start u24 | length u8`, then fresh symbols heard as a u24).
+  runs of `start u24 | length u8`, then fresh symbols heard as a u24, then the
+  share heard since the last ack as 1 + percent in a u8, 0 when unknown; older
+  builds send 0, so no version bump).
 - Bundle:
   `u32 length | deflate-raw(u32 manifestLength | manifest JSON | item bytes...) | sha256[0..8]`.
   `length` counts compressed bytes plus hash, so block padding past it is

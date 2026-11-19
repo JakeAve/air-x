@@ -559,10 +559,12 @@ listenButton.addEventListener("click", async () => {
       silenceMs: SILENCE_MS,
       turnaroundMs: turnaround,
       ackEvery: ackEvery || undefined,
-      onAck: (transferId, runs) => {
+      onAck: (transferId, runs, share) => {
         const blocks = runs.reduce((sum, r) => sum + r.length, 0);
         log(
-          `receive: transfer ${transferId} ack: ${blocks} blocks in ${runs.length} runs`,
+          `receive: transfer ${transferId} ack: ${blocks} blocks in ${runs.length} runs, heard ${
+            share === undefined ? "-" : `${Math.round(share * 100)}%`
+          }`,
         );
       },
       signal: controller.signal,

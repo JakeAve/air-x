@@ -588,6 +588,14 @@ main[data-screen="home"] .log {
   stroke-linecap: square;
 }
 
+/* A thumbnail at its own aspect ratio, never taller than a few lines of text. */
+.items img {
+  display: block;
+  max-width: 100%;
+  max-height: 8rem;
+  justify-self: start;
+}
+
 pre {
   margin: 0;
   font: 0.875rem/1.4 var(--font-mono);

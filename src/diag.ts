@@ -31,6 +31,7 @@ const sendTitle = $<HTMLHeadingElement>("send-title");
 const sendText = $<HTMLTextAreaElement>("send-text");
 const sendFiles = $<HTMLInputElement>("send-files");
 const sendFilesClear = $<HTMLButtonElement>("send-files-clear");
+const sendItems = $<HTMLUListElement>("send-items");
 const sendEstimate = $<HTMLParagraphElement>("send-estimate");
 const packetsPerCodeInput = $<HTMLInputElement>("packets-per-code");
 const fpsInput = $<HTMLInputElement>("fps");
@@ -254,7 +255,7 @@ async function collectItems(): Promise<Item[]> {
       bytes: new TextEncoder().encode(sendText.value),
     });
   }
-  for (const file of sendFiles.files ?? []) {
+  for (const file of picked) {
     items.push({
       name: file.name,
       type: file.type || "application/octet-stream",
@@ -271,8 +272,53 @@ for (const radio of document.querySelectorAll('input[name="send-by"]')) {
   radio.addEventListener("change", () => sendByEdited = true);
 }
 
+// The cards are the list: a fresh pick replaces it, and each card can remove its file.
+let picked: File[] = [];
+let sendUrls: string[] = [];
+const EXCERPT_BYTES = 280;
+
+function setPicked(files: File[]) {
+  picked = files;
+  if (!files.length) sendFiles.value = "";
+  sendFilesClear.hidden = !files.length;
+  for (const url of sendUrls) URL.revokeObjectURL(url);
+  sendUrls = [];
+  sendItems.replaceChildren(...files.map(fileCard));
+  itemsChanged();
+}
+
+function fileCard(file: File) {
+  const type = file.type || "application/octet-stream";
+  const { li, meta } = itemCard(file.name, type, file.size);
+  let url: string | undefined;
+  if (type.startsWith("image/")) {
+    url = URL.createObjectURL(file);
+    sendUrls.push(url);
+    li.append(thumbnail(url));
+  } else if (type.startsWith("text/")) {
+    const pre = document.createElement("pre");
+    li.append(pre);
+    file.slice(0, EXCERPT_BYTES).text().then((text) =>
+      pre.textContent = file.size > EXCERPT_BYTES ? `${text}…` : text
+    );
+  }
+  const remove = document.createElement("a");
+  remove.href = "#";
+  remove.role = "button";
+  setIcon(remove, "Remove");
+  remove.addEventListener("click", (event) => {
+    event.preventDefault();
+    if (url) URL.revokeObjectURL(url);
+    li.remove();
+    picked = picked.filter((f) => f !== file);
+    if (!picked.length) setPicked([]);
+    else itemsChanged();
+  });
+  meta.append(remove);
+  return li;
+}
+
 function itemsChanged() {
-  sendFilesClear.hidden = !sendFiles.files?.length;
   clearTimeout(sizeTimer);
   sizeTimer = setTimeout(async () => {
     const run = ++sizing;
@@ -298,10 +344,11 @@ function itemsChanged() {
   }, 300);
 }
 sendForm.addEventListener("input", itemsChanged);
-sendFilesClear.addEventListener("click", () => {
-  sendFiles.value = "";
-  itemsChanged();
-});
+sendFiles.addEventListener(
+  "change",
+  () => setPicked([...sendFiles.files ?? []]),
+);
+sendFilesClear.addEventListener("click", () => setPicked([]));
 
 sendButton.addEventListener("click", async () => {
   if (running) {
@@ -446,28 +493,41 @@ sendButton.addEventListener("click", async () => {
 
 let objectUrls: string[] = [];
 
-function renderItem(item: Item) {
+function itemCard(name: string, type: string, bytes: number) {
   const li = document.createElement("li");
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  const label = document.createElement("span");
+  label.textContent = `${name} · ${type} · ${size(bytes)}`;
+  meta.append(label);
+  li.append(meta);
+  return { li, meta };
+}
+
+function thumbnail(url: string) {
+  const img = document.createElement("img");
+  img.src = url;
+  img.alt = "";
+  return img;
+}
+
+function renderItem(item: Item) {
   const blob = new Blob([item.bytes as Uint8Array<ArrayBuffer>], {
     type: item.type,
   });
   const url = URL.createObjectURL(blob);
   objectUrls.push(url);
-  const meta = document.createElement("div");
-  meta.className = "meta";
-  const name = document.createElement("span");
-  name.textContent = `${item.name} · ${item.type} · ${size(item.bytes.length)}`;
+  const { li, meta } = itemCard(item.name, item.type, item.bytes.length);
   const link = document.createElement("a");
   link.href = url;
   link.download = item.name;
   setIcon(link, "Download");
-  meta.append(name);
   const isText = item.type.startsWith("text/");
   if (isText || item.type.startsWith("image/")) {
     meta.append(copyLink(blob, isText));
   }
   meta.append(link);
-  li.append(meta);
+  if (item.type.startsWith("image/")) li.append(thumbnail(url));
   if (isText) {
     const text = document.createElement("pre");
     text.textContent = new TextDecoder().decode(item.bytes);
@@ -506,6 +566,7 @@ const ICONS = {
   Copied: "M5 12l5 5 9-10",
   "Copy failed": "M6 6l12 12M18 6L6 18",
   Download: "M12 4v11M7 10l5 5 5-5M5 20h14",
+  Remove: "M6 6l12 12M18 6L6 18",
 };
 
 // Icons on a 24 grid like the tiles'; the label is what a screen reader says.

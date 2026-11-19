@@ -633,7 +633,7 @@ main[data-screen="home"] .log {
   color: var(--label);
 }
 
-/* A long file name wraps instead of pushing Copy and Download off the card. */
+/* A long file name wraps instead of pushing its icons off the card. */
 .items .meta span {
   flex: 1;
   min-width: 0;
@@ -664,11 +664,15 @@ main[data-screen="home"] .log {
 }
 
 /* A thumbnail at its own aspect ratio, never taller than a few lines of text. */
-.items img {
+.items :is(img, video) {
   display: block;
   max-width: 100%;
   max-height: 8rem;
   justify-self: start;
+}
+
+.items audio {
+  width: 100%;
 }
 
 pre {

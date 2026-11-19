@@ -526,14 +526,48 @@ function renderItem(item: Item) {
   if (isText || item.type.startsWith("image/")) {
     meta.append(copyLink(blob, isText));
   }
+  const viewType = openType(item.type);
+  if (viewType) meta.append(openLink(item.bytes, viewType));
   meta.append(link);
   if (item.type.startsWith("image/")) li.append(thumbnail(url));
+  else if (/^(video|audio)\//.test(item.type)) {
+    const player = document.createElement(
+      item.type.startsWith("video/") ? "video" : "audio",
+    );
+    player.src = url;
+    player.controls = true;
+    player.preload = "metadata";
+    player.setAttribute("playsinline", "");
+    li.append(player);
+  }
   if (isText) {
     const text = document.createElement("pre");
     text.textContent = new TextDecoder().decode(item.bytes);
     li.append(text);
   }
   receivedItems.append(li);
+}
+
+// A blob URL opens with this page's origin, so the sender's markup or SVG opens
+// as plain text, never as a page that could run script here.
+function openType(type: string) {
+  if (/^(image\/(?!svg)|video\/|audio\/)|^application\/pdf$/.test(type)) {
+    return type;
+  }
+  if (/^text\/|svg|xml|json/.test(type)) return "text/plain;charset=utf-8";
+}
+
+function openLink(bytes: Uint8Array, type: string) {
+  const url = URL.createObjectURL(
+    new Blob([bytes as Uint8Array<ArrayBuffer>], { type }),
+  );
+  objectUrls.push(url);
+  const open = document.createElement("a");
+  open.href = url;
+  open.target = "_blank";
+  open.rel = "noopener";
+  setIcon(open, "Open");
+  return open;
 }
 
 // The clipboard takes text, and images only as PNG, so other images are redrawn as PNG.
@@ -566,6 +600,7 @@ const ICONS = {
   Copied: "M5 12l5 5 9-10",
   "Copy failed": "M6 6l12 12M18 6L6 18",
   Download: "M12 4v11M7 10l5 5 5-5M5 20h14",
+  Open: "M14 4h6v6M20 4l-9 9M18 14v6H4V6h6",
   Remove: "M6 6l12 12M18 6L6 18",
 };
 

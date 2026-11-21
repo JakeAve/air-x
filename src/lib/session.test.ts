@@ -17,6 +17,7 @@ import {
   type Run,
 } from "./packet.ts";
 import type { QrRate, RateSample } from "./rate.ts";
+import { packetDecoder } from "./transferDecoder.ts";
 import {
   receiveBundle,
   type Received,
@@ -169,6 +170,10 @@ function testItems(noiseBytes = 400): Item[] {
   ];
 }
 
+function qrDecoder(source: PacketSource) {
+  return packetDecoder(source, { name: "qr", countFrom: "first" });
+}
+
 function sound(channel: PacketChannel, listenEvery: number, windowMs: number) {
   return { listen: channel, sound: { channel, listenEvery, windowMs } };
 }
@@ -305,8 +310,8 @@ Deno.test("foreign transfers and corrupt bytes are counted and ignored", async (
     [encodePacket(foreign), corrupt, new Uint8Array(10)],
     never,
   );
-  assertEquals(last?.heard, 1);
-  assertEquals(last?.rejected, 2);
+  assertEquals(last?.sound.heard, 1);
+  assertEquals(last?.sound.rejected, 2);
   assertEquals(last?.transfers.map((t) => t.transferId), [0]);
 
   const sent = await sendBundle(bundle, {
@@ -318,7 +323,7 @@ Deno.test("foreign transfers and corrupt bytes are counted and ignored", async (
   const result = await received;
   assert(result);
   assertEquals(result.items, items);
-  assertEquals(last?.rejected, 2);
+  assertEquals(last?.sound.rejected, 2);
 });
 
 Deno.test("a receiver turnaround longer than the sender's deaf time lets DONE land", async () => {
@@ -367,7 +372,7 @@ Deno.test("a QR-only transfer completes over lost codes and DONE goes out at onc
 
   const received = receiveBundle({
     sound: air.party(),
-    sources: [display],
+    camera: [qrDecoder(display)],
     silenceMs: 60_000,
     signal: stopReceiver.signal,
   });
@@ -431,21 +436,20 @@ Deno.test("an Ack queues its blocks ahead of fresh symbols", async () => {
   assertEquals(events[1].acked, 3);
 });
 
-Deno.test("a source that delivers each code twice counts sourceNew once per symbol", async () => {
+Deno.test("a source that delivers each code twice counts fresh once per symbol", async () => {
   const items = testItems();
   const bundle = await encodeBundle(items);
   const air = new Air({ seed: 11 });
   const display = new Display({ seed: 11 });
   const doubling = new DoublingSource(display);
   const stopReceiver = new AbortController();
-  let last: ReceiveProgress | undefined;
+  const qr = qrDecoder(doubling);
 
   const received = receiveBundle({
     sound: air.party(),
-    sources: [doubling],
+    camera: [qr],
     silenceMs: 60_000,
     signal: stopReceiver.signal,
-    onProgress: (p) => last = p,
   });
   const sent = await sendBundle(bundle, {
     listen: air.party(),
@@ -456,9 +460,8 @@ Deno.test("a source that delivers each code twice counts sourceNew once per symb
   assertEquals(sent, "done");
   stopReceiver.abort();
   await received;
-  assert(last);
-  assert(last!.sourceNew > 0);
-  assertEquals(last!.sourceHeard, last!.sourceNew * 2);
+  assert(qr.stats.fresh > 0);
+  assertEquals(qr.stats.heard, qr.stats.fresh * 2);
 });
 
 Deno.test("a QR-only transfer whose DONE is lost gets DONE again after silence, then finishes", async () => {
@@ -475,7 +478,7 @@ Deno.test("a QR-only transfer whose DONE is lost gets DONE again after silence, 
 
   const received = receiveBundle({
     sound: air.party(),
-    sources: [display],
+    camera: [qrDecoder(display)],
     silenceMs: SILENCE_MS,
     signal: new AbortController().signal,
     onDone: () => dones.push(Date.now() - start),
@@ -505,7 +508,7 @@ Deno.test("a QR receiver acks the blocks of dropped codes and the sender resends
 
   const received = receiveBundle({
     sound: air.party(),
-    sources: [display],
+    camera: [qrDecoder(display)],
     silenceMs: 60_000,
     ackEvery: 4,
     signal: stopReceiver.signal,
@@ -551,7 +554,7 @@ Deno.test("an LT-sized QR transfer with many dropped codes finishes in few symbo
 
   const received = receiveBundle({
     sound: air.party(),
-    sources: [display],
+    camera: [qrDecoder(display)],
     silenceMs: 60_000,
     ackEvery: 16,
     signal: stopReceiver.signal,
@@ -583,7 +586,7 @@ Deno.test("dense repair finishes inside the ack period, so no ack goes out", asy
 
   const received = receiveBundle({
     sound: air.party(),
-    sources: [display],
+    camera: [qrDecoder(display)],
     silenceMs: 60_000,
     ackEvery: 80,
     signal: stopReceiver.signal,
@@ -615,7 +618,7 @@ Deno.test("a QR transfer that completes during an ack's turnaround still gets DO
 
   const received = receiveBundle({
     sound: air.party(),
-    sources: [display],
+    camera: [qrDecoder(display)],
     silenceMs: 60_000,
     turnaroundMs: 30,
     ackEvery: 1,
@@ -700,7 +703,7 @@ Deno.test("a QR receiver's acks report the highest id and fresh symbols heard, n
 
   const received = receiveBundle({
     sound: air.party(),
-    sources: [display],
+    camera: [qrDecoder(display)],
     silenceMs: 60_000,
     ackEvery: 4,
     signal: stop.signal,
@@ -736,7 +739,7 @@ Deno.test("a receiver that starts looking late measures its share from the first
 
   const received = receiveBundle({
     sound: air.party(),
-    sources: [display],
+    camera: [qrDecoder(display)],
     silenceMs: 60_000,
     ackEvery: 4,
     signal: stop.signal,

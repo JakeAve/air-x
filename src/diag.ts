@@ -4,6 +4,7 @@ import type { SoundTransport } from "@/adapters/soundTransport.ts";
 import { encodeBundle, type Item } from "@/lib/bundle.ts";
 import { blockCount } from "@/lib/fountain/symbols.ts";
 import { receiveBundle, sendBundle } from "@/lib/session.ts";
+import { packetDecoder } from "@/lib/transferDecoder.ts";
 import {
   PACKET_SECONDS,
   QR_PACKET_BYTES,
@@ -680,6 +681,7 @@ listenButton.addEventListener("click", async () => {
   gridReset("rx-grid", 0, 1, 1);
   show("rx-count", "waiting for a transfer");
   let scanReport: ReturnType<typeof setInterval> | undefined;
+  let qrDecoder: ReturnType<typeof packetDecoder> | undefined;
   try {
     const { sound, qr } = await opened;
     scanningQr = cameraToggle.checked;
@@ -709,9 +711,13 @@ listenButton.addEventListener("click", async () => {
     );
     let counts = "sound 0, qr 0, rejected 0";
     let shown: number | undefined;
+    qrDecoder = scanningQr
+      ? packetDecoder(qr, { name: "qr", countFrom: "first" })
+      : undefined;
+    const qrStats = qrDecoder?.stats;
     const done = await receiveBundle({
       sound,
-      sources: scanningQr ? [qr] : undefined,
+      camera: qrDecoder ? [qrDecoder] : undefined,
       silenceMs: SILENCE_MS,
       turnaroundMs: turnaround,
       ackEvery: ackEvery || undefined,
@@ -724,20 +730,15 @@ listenButton.addEventListener("click", async () => {
         );
       },
       signal: controller.signal,
-      onProgress: (
-        {
-          soundHeard,
-          sourceHeard: qrHeard,
-          rejected,
-          transfers,
-        },
-      ) => {
-        counts = `sound ${soundHeard}, qr ${qrHeard}, rejected ${rejected}`;
+      onProgress: ({ sound: soundStats, transfers }) => {
+        counts = `sound ${soundStats.heard}, qr ${
+          qrStats?.heard ?? 0
+        }, rejected ${soundStats.rejected + (qrStats?.rejected ?? 0)}`;
         const t = transfers.reduce(
-          (best, t) => t.resolved > best.resolved ? t : best,
+          (best, t) => t.progress > best.progress ? t : best,
           transfers[0],
         );
-        if (t) {
+        if (t?.k !== undefined && t.states) {
           if (t.transferId !== shown) {
             shown = t.transferId;
             gridReset(
@@ -748,7 +749,7 @@ listenButton.addEventListener("click", async () => {
             );
           }
           gridPaint("rx-grid", t.states());
-          show("rx-count", `${t.resolved} of ${t.k} blocks`);
+          show("rx-count", `${Math.round(t.progress * t.k)} of ${t.k} blocks`);
         }
       },
       onComplete: ({ transferId, items }) => {
@@ -783,6 +784,8 @@ listenButton.addEventListener("click", async () => {
     stopTicker?.();
     clearInterval(scanReport);
     running = undefined;
+    qrDecoder?.close();
+    qrDecoder = undefined;
     scanningQr = false;
     closeCamera();
     receiveRun.hidden = !received;

@@ -71,15 +71,19 @@ fresh port is a clean origin. README, "Testing on phones", has the rest.
   tuning it that `dev` inlines when present. Visual rules live in
   `.claude/skills/air-x-style/SKILL.md`; read it before touching markup or CSS.
 - `src/diag.ts` — the page: three screens picked by the hash (`#home`, `#send`,
-  `#receive`; leaving a screen aborts its transfer). Send text and files by QR
-  or sound (the Send by radio defaults to sound for bundles up to 2048 bytes,
-  else QR, until picked by hand) with a live time estimate of both; receive from
-  camera and mic at once; log, including acks on both ends. One button per
-  screen flips between Send/Listen and Stop. Tuning inputs sit under Advanced.
+  `#receive`; leaving a screen aborts its transfer). Send text and files by
+  sound or camera (the Send by radio defaults to sound for bundles up to 2048
+  bytes, else camera, until picked by hand) with a live time estimate of both;
+  receive from camera and mic at once, with a share bar per transfer; log,
+  including acks on both ends. One button per screen flips between Send/Listen
+  and Stop. A camera send shows the code full-window with its own Stop button.
+  Tuning inputs sit under Advanced, including a camera codec select (QR only).
   Defaults: 4 packets per code, 5 fps, ECC medium, adapt rate on; camera on,
   scan max edge 1280, ack every 80 symbols (0 never acks); silence 12 s.
 - `src/adapters/` — the only browser-API code besides the entries: `pageLink.ts`
-  (`openDevices`: one codec worker shared by both transports),
+  (`openDevices`: one codec worker shared by both transports; `cameraCodecs`:
+  the registry of camera codecs by name, each an `encoder` and a `decoder()`
+  factory, which the page's codec select and receive path read),
   `soundTransport.ts` (`SoundTransport`, a `PacketChannel`), `qrTransport.ts`
   (`QrTransport`, a `PacketSource` and `PacketDisplay`), `camera.ts`,
   `screen.ts` (draws a code on a canvas), `codecWorker.ts`, `microphone.ts`,
@@ -125,33 +129,49 @@ The protocol layer. Spec: the main checkout's
   `send(packets, signal)`), `PacketDisplay` (`show`, `clear`).
 - `receiver.ts` — `Receiver`: one decoder per interleaved transfer, evicts stale
   ones.
-- `session.ts` — `sendBundle` (sound or QR, never both: sound bursts of
-  `listenEvery` then a listen window, or QR codes of `packetsPerCode` 128-byte
-  packets at `fps`, until DONE is heard; Ack packets heard on `listen` queue
-  their blocks, and each burst or code sends queued blocks before fresh symbols)
-  and `receiveBundle` (sound plus any `sources`; sends DONE by sound). Silence
-  rules count sound only: once complete, DONE goes out at once if no sound from
-  the transfer was heard within `silenceMs`, else after `silenceMs` of sound
-  silence or on a `DataListen`. After DONE, packets of that transfer (QR
-  included) mean the sender missed it, so silence re-sends DONE; silence with
-  nothing heard since DONE finishes. With `ackEvery` set, the receiver sends an
-  `Ack` by sound every `ackEvery` new symbols (resends included), with DONE's
-  timing and `turnaroundMs`; counting starts at a transfer's first symbol from a
-  source, or its first repair symbol when it comes by sound. Every ack reports
-  the highest symbol id and the count of fresh symbols heard; it names missing
-  runs only once a repair symbol was heard. Each ack is a snapshot, so a lost
-  resend is simply named again, and the sender ignores blocks already queued. A
-  bundle that finishes inside the period never acks. Acks heard from other
-  receivers count as neither symbols nor sound from the transfer. With
-  `qr.adapt`, every ack carries the share of fresh ids the receiver heard since
-  its last ack, counted from just below the first id it saw, so a receiver that
-  starts looking late is not read as loss; the sender passes it to its
-  `RatePolicy` as a `RateSample` and uses the rate it returns. Once an ack has
-  been heard, `silentAfter` fresh symbols with no ack give a `silent` sample;
-  before the first ack, no one may be looking yet, so silence means nothing.
+- `cameraCodec.ts` — `CameraEncoder`
+  (`start(bundle, transferId, rate, signal,
+  onFrame)` returns a
+  `CameraSending` with `setRate`, `resend`, `fresh`, `done`; `seconds` estimates
+  a send) and `qrEncoder`: QR codes of `packetsPerCode` 128-byte packets at
+  `fps`. `OVERHEAD` is the 10 % repair the estimate assumes.
+- `transferDecoder.ts` — `TransferDecoder`, what `receiveBundle` takes from a
+  camera codec: `onHeard`, `onComplete`, `ack` (the figures for one ack),
+  `status`, `forget`, `close`. `packetDecoder` is the fountain-packet one over a
+  `PacketSource`; `countFrom` says whether units count toward `ackEvery` from
+  the first symbol or the first repair symbol.
+- `symbolStream.ts` — `SymbolStream`: queued resend blocks first, then fresh
+  symbols from an `Encoder`; `sendBundle` uses it for sound, `qrEncoder` for QR.
+- `session.ts` — `sendBundle` (`sound` or `camera: { encoder, rate, adapt }`,
+  never both: sound bursts of `listenEvery` then a listen window, or the camera
+  encoder's frames at its `rate`, until DONE is heard; Ack packets heard on
+  `listen` queue their blocks, and each burst or frame sends queued blocks
+  before fresh symbols) and `receiveBundle` (sound plus any `camera` decoders, a
+  transfer belonging to the decoder that first reports it; sends DONE by sound).
+  Silence rules count sound only: once complete, DONE goes out at once if no
+  sound from the transfer was heard within `silenceMs`, else after `silenceMs`
+  of sound silence or on a `DataListen`. After DONE, packets of that transfer
+  (camera included) mean the sender missed it, so silence re-sends DONE; silence
+  with nothing heard since DONE finishes. With `ackEvery` set, the receiver
+  sends an `Ack` by sound every `ackEvery` new symbols (resends included), with
+  DONE's timing and `turnaroundMs`; counting starts at a transfer's first symbol
+  from a decoder, or its first repair symbol when it comes by sound. Every ack
+  reports the highest symbol id and the count of fresh units heard; its runs are
+  optional (a codec may name no blocks) and a packet decoder names them only
+  once a repair symbol was heard. Each ack is a snapshot, so a lost resend is
+  simply named again, and the sender ignores blocks already queued. A bundle
+  that finishes inside the period never acks. Acks heard from other receivers
+  count as neither symbols nor sound from the transfer. With `camera.adapt`,
+  every ack carries the share of fresh ids the receiver heard since its last
+  ack, counted from just below the first id it saw, so a receiver that starts
+  looking late is not read as loss; the sender passes it to its `RatePolicy` as
+  a `RateSample` and uses the rate it returns. Once an ack has been heard,
+  `silentAfter` fresh symbols with no ack give a `silent` sample; before the
+  first ack, no one may be looking yet, so silence means nothing.
 - `rate.ts` — the decision engine, apart from the plumbing: `RatePolicy` is a
-  function from a `RateSample` to the next `QrRate`. `ladderPolicy` is the one
-  in use; its ladder (2 to 9 packets per code, 5 to 10 fps) and thresholds are
+  function from a `RateSample` to the next `CameraRate` (`fps`, and an optional
+  `packetsPerCode`, 1 when left out). `ladderPolicy` is the one in use; its
+  ladder (2 to 9 packets per code, 5 to 10 fps) and thresholds are
   `LADDER_DEFAULTS`, guesses to be tuned on phones. `SILENT_AFTER` is 240. The
   receiver needs no rate: a code says how many packets it holds.
 - `qr/` — `qrEncoder.ts` (128-byte packets into one byte-mode code, `QrEcc`;

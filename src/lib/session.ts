@@ -1,24 +1,19 @@
 import { anySignal, sleep } from "./abort.ts";
 import { BundleError, decodeBundle, type Item } from "./bundle.ts";
-import type { PacketChannel, PacketDisplay, PacketSource } from "./channel.ts";
-import { Encoder } from "./fountain/encoder.ts";
+import type { CameraEncoder, CameraSending } from "./cameraCodec.ts";
+import type { PacketChannel, PacketSource } from "./channel.ts";
 import {
   ackShare,
   decodeAck,
   decodePacket,
   encodeAck,
   encodePacket,
-  type Packet,
   PacketType,
   type Run,
 } from "./packet.ts";
-import {
-  ACK_RUNS,
-  dataBytes,
-  QR_PACKET_BYTES,
-  SOUND_PACKET_BYTES,
-} from "./protocol.ts";
-import type { QrRate, RatePolicy, RateSample } from "./rate.ts";
+import { ACK_RUNS, dataBytes, SOUND_PACKET_BYTES } from "./protocol.ts";
+import type { CameraRate, RatePolicy, RateSample } from "./rate.ts";
+import { SymbolStream } from "./symbolStream.ts";
 import {
   packetDecoder,
   type PacketStats,
@@ -29,17 +24,23 @@ import {
 
 export interface SendProgress {
   transferId: number;
-  k: number;
+  /** The sound transfer's block count; a camera codec's units need not be blocks. */
+  k?: number;
   soundSent: number;
-  qrSent: number;
-  codes: number;
-  /** The batch that just went out. */
-  via: "sound" | "qr";
+  cameraFrames: number;
+  /** Fresh units the camera codec sent. */
+  cameraFresh: number;
+  /** Fresh bytes sent on the live path. */
+  freshBytes: number;
+  /** The batch or frame that just went out. */
+  via: "sound" | "camera";
   symbolIds: number[];
   /** Blocks queued for resend from acks so far. */
   acked: number;
-  /** The rate of a QR batch. */
-  rate?: QrRate;
+  /** The last ack's share heard. */
+  share?: number;
+  /** The rate of a camera frame. */
+  rate?: CameraRate;
 }
 
 export interface SoundSend {
@@ -48,15 +49,14 @@ export interface SoundSend {
   windowMs: number;
 }
 
-export interface QrSend {
-  display: PacketDisplay;
+export interface CameraSend {
+  encoder: CameraEncoder;
   /** With `adapt`, only where the rate starts. */
-  packetsPerCode: number;
-  fps: number;
+  rate: CameraRate;
   /**
    * Lets `policy` change the rate as the receiver's acks come in: one sample
    * per ack, from the share heard the receiver measured itself,
-   * and a silent one each time `silentAfter` fresh symbols go out with no ack,
+   * and a silent one each time `silentAfter` fresh units go out with no ack,
    * once some ack was heard (before that, no one may be looking yet).
    */
   adapt?: { policy: RatePolicy; silentAfter: number };
@@ -65,9 +65,9 @@ export interface QrSend {
 export interface SendOptions {
   /** Where DONE and acks are heard. */
   listen: PacketSource;
-  /** Exactly one of `sound` and `qr`. */
+  /** Exactly one of `sound` and `camera`. */
   sound?: SoundSend;
-  qr?: QrSend;
+  camera?: CameraSend;
   signal: AbortSignal;
   onProgress?: (p: SendProgress) => void;
 }
@@ -76,64 +76,53 @@ export async function sendBundle(
   bundle: Uint8Array,
   options: SendOptions,
 ): Promise<"done" | "stopped"> {
-  const { listen, sound, qr, signal, onProgress } = options;
-  if (!sound && !qr) throw new RangeError("sendBundle needs sound or qr");
-  if (sound && qr) {
-    throw new RangeError("sendBundle takes sound or qr, not both");
+  const { listen, sound, camera, signal, onProgress } = options;
+  if (!sound && !camera) {
+    throw new RangeError("sendBundle needs sound or camera");
+  }
+  if (sound && camera) {
+    throw new RangeError("sendBundle takes sound or camera, not both");
   }
   const transferId = crypto.getRandomValues(new Uint16Array(1))[0];
-  const encoder = new Encoder(
-    bundle,
-    transferId,
-    qr ? QR_PACKET_BYTES : SOUND_PACKET_BYTES,
-  );
   const heardDone = new AbortController();
   const stop = anySignal(signal, heardDone.signal);
+  const stream = sound
+    ? new SymbolStream(bundle, transferId, SOUND_PACKET_BYTES)
+    : undefined;
   let soundSent = 0;
-  let qrSent = 0;
-  let codes = 0;
+  let cameraFrames = 0;
+  let cameraFresh = 0;
+  let freshBytes = 0;
   let acked = 0;
-  const wanted: number[] = [];
-  const queued = new Set<number>();
-  let rate: QrRate = {
-    packetsPerCode: qr?.packetsPerCode ?? 0,
-    fps: qr?.fps ?? 0,
-  };
-  /** Fresh symbols sent, which is also the next fresh symbol id. */
-  let fresh = 0;
+  let share: number | undefined;
+  let rate = camera?.rate;
+  let sending: CameraSending | undefined;
   /** Fresh count when the receiver was last heard from, or last given up on. */
   let quietSince = 0;
   /** Silence means nothing until a receiver has acked: it may not be looking yet. */
   let everAcked = false;
   const retune = (sample: Omit<RateSample, "rate">) => {
-    const next = qr!.adapt!.policy({ rate, ...sample });
-    quietSince = fresh;
-    rate = next;
+    rate = camera!.adapt!.policy({ rate: rate!, ...sample });
+    quietSince = sending!.fresh;
+    sending!.setRate(rate);
   };
-  const progress = (via: "sound" | "qr", symbolIds: number[]) =>
+  const progress = (
+    via: "sound" | "camera",
+    symbolIds: number[],
+    frameRate?: CameraRate,
+  ) =>
     onProgress?.({
       transferId,
-      k: encoder.k,
+      k: stream?.k,
       soundSent,
-      qrSent,
-      codes,
+      cameraFrames,
+      cameraFresh,
+      freshBytes,
       via,
       symbolIds,
       acked,
-      rate: via === "qr" ? rate : undefined,
-    });
-
-  /** Queued blocks first, then fresh symbols; the last packet gets `lastType`. */
-  const batch = (count: number, lastType: PacketType): Packet[] =>
-    Array.from({ length: count }, (_, i) => {
-      const type = i === count - 1 ? lastType : PacketType.Data;
-      const id = wanted.shift();
-      if (id === undefined) {
-        fresh++;
-        return encoder.next(type);
-      }
-      queued.delete(id);
-      return encoder.symbol(id, type);
+      share,
+      rate: frameRate,
     });
 
   const unsubscribe = listen.onPacket((bytes) => {
@@ -142,53 +131,50 @@ export async function sendBundle(
     if (packet?.transferId !== transferId) return;
     if (packet.type === PacketType.Done) heardDone.abort();
     if (packet.type !== PacketType.Ack) return;
-    if (qr?.adapt) {
+    const heard = ackShare(packet.data);
+    if (heard !== undefined) share = heard;
+    if (camera?.adapt && sending) {
       // ponytail: the receiver's stretch since its last ack can straddle a
       // rate change by the ack's flight time; ignored.
-      const share = ackShare(packet.data);
-      quietSince = fresh;
+      quietSince = sending.fresh;
       everAcked = true;
-      if (share !== undefined) retune({ heard: share });
+      if (heard !== undefined) retune({ heard });
     }
-    for (const { start, length } of decodeAck(packet.data)) {
-      for (let id = start; id < start + length && id < encoder.k; id++) {
-        if (queued.has(id)) continue;
-        queued.add(id);
-        wanted.push(id);
-        acked++;
-      }
-    }
+    acked += (stream ?? sending)?.resend(decodeAck(packet.data)) ?? 0;
   });
 
   try {
-    while (!stop.aborted) {
-      if (sound) {
-        const { channel, listenEvery, windowMs } = sound;
-        const symbols = batch(listenEvery, PacketType.DataListen);
+    if (sound && stream) {
+      const { channel, listenEvery, windowMs } = sound;
+      const blockBytes = dataBytes(SOUND_PACKET_BYTES, stream.k);
+      while (!stop.aborted) {
+        const symbols = stream.next(listenEvery, PacketType.DataListen);
         await channel.send(symbols.map(encodePacket), stop);
         if (stop.aborted) break;
         soundSent += symbols.length;
+        freshBytes = stream.fresh * blockBytes;
         progress("sound", symbols.map((s) => s.symbolId));
         await sleep(windowMs, stop);
-      } else if (qr) {
-        const symbols = batch(rate.packetsPerCode ?? 1, PacketType.Data);
-        qr.display.show(symbols.map(encodePacket));
-        qrSent += symbols.length;
-        codes++;
-        progress("qr", symbols.map((s) => s.symbolId));
+      }
+    } else if (camera) {
+      sending = camera.encoder.start(bundle, transferId, rate!, stop, (f) => {
+        cameraFrames = f.frames;
+        cameraFresh = f.fresh;
+        freshBytes = f.freshBytes;
+        progress("camera", f.symbolIds ?? [], f.rate);
         if (
-          qr.adapt && everAcked && fresh - quietSince >= qr.adapt.silentAfter
+          camera.adapt && everAcked &&
+          f.fresh - quietSince >= camera.adapt.silentAfter
         ) {
           retune({ silent: true });
         }
-        await sleep(1000 / rate.fps, stop);
-      }
+      });
+      await sending.done;
     }
   } catch (err) {
     if (!stop.aborted) throw err;
   } finally {
     unsubscribe();
-    qr?.display.clear();
   }
   return heardDone.signal.aborted ? "done" : "stopped";
 }

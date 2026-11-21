@@ -2,6 +2,7 @@ import { openDevices } from "@/adapters/pageLink.ts";
 import type { QrTransport } from "@/adapters/qrTransport.ts";
 import type { SoundTransport } from "@/adapters/soundTransport.ts";
 import { encodeBundle, type Item } from "@/lib/bundle.ts";
+import { OVERHEAD, qrEncoder } from "@/lib/cameraCodec.ts";
 import { blockCount } from "@/lib/fountain/symbols.ts";
 import { receiveBundle, sendBundle } from "@/lib/session.ts";
 import { packetDecoder } from "@/lib/transferDecoder.ts";
@@ -18,8 +19,6 @@ const SILENCE_MS = 12_000;
 /** How often a receive logs what its camera scan has seen. */
 const SCAN_REPORT_MS = 5_000;
 const SOUND_DEFAULT_MAX_BYTES = 2048;
-/** Packets the sender expects to need: k plus 10 % repair. */
-const OVERHEAD = 1.1;
 
 function $<T extends HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
@@ -418,17 +417,17 @@ sendButton.addEventListener("click", async () => {
     // Past the first n packets the grid empties and refills once per pass.
     let pass = 0;
     let ackedSoFar = 0;
+    let cameraSent = 0;
     let rateNow = packetsPerCode * fps;
     result = await sendBundle(bundle, {
       listen: sound,
       sound: by === "sound"
         ? { channel: sound, listenEvery, windowMs }
         : undefined,
-      qr: by === "qr"
+      camera: by === "qr"
         ? {
-          display: qr,
-          packetsPerCode,
-          fps,
+          encoder: qrEncoder(qr),
+          rate: { packetsPerCode, fps },
           adapt: adaptRateToggle.checked
             ? { policy: ladderPolicy(), silentAfter: SILENT_AFTER }
             : undefined,
@@ -436,9 +435,10 @@ sendButton.addEventListener("click", async () => {
         : undefined,
       signal: controller.signal,
       onProgress: (
-        { transferId, k, soundSent, qrSent, via, symbolIds, acked, rate },
+        { transferId, k, soundSent, via, symbolIds, acked, rate },
       ) => {
-        const sent = soundSent + qrSent;
+        if (via === "camera") cameraSent += symbolIds.length;
+        const sent = soundSent + cameraSent;
         if (rate && (rate.packetsPerCode ?? 1) * rate.fps !== rateNow) {
           rateNow = (rate.packetsPerCode ?? 1) * rate.fps;
           log(`send: rate now ${rate.packetsPerCode}/code @ ${rate.fps} fps`);
@@ -454,7 +454,7 @@ sendButton.addEventListener("click", async () => {
               (cell as HTMLElement).dataset.s = "0";
             }
           }
-          gridMark("send-grid", id % n, via === "qr" ? 2 : 3);
+          gridMark("send-grid", id % n, via === "camera" ? 2 : 3);
         }
         show(
           "send-count",
@@ -462,7 +462,11 @@ sendButton.addEventListener("click", async () => {
         );
         if (!announced) {
           announced = true;
-          log(`send: transfer ${transferId}, k ${k}`);
+          log(
+            `send: transfer ${transferId}, k ${
+              k ?? blockCount(bundle.length, QR_PACKET_BYTES)
+            }`,
+          );
         }
       },
     });

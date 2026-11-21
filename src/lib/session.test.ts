@@ -3,7 +3,13 @@ import { sleep } from "./abort.ts";
 import { encodeBundle, type Item } from "./bundle.ts";
 import type { PacketChannel, PacketDisplay, PacketSource } from "./channel.ts";
 import { Encoder } from "./fountain/encoder.ts";
-import { dataBytes, DENSE_MAX_K, SOUND_PACKET_BYTES } from "./protocol.ts";
+import {
+  dataBytes,
+  DENSE_MAX_K,
+  QR_PACKET_BYTES,
+  SOUND_PACKET_BYTES,
+} from "./protocol.ts";
+import { blockCount } from "./fountain/symbols.ts";
 
 const DATA_BYTES = dataBytes(SOUND_PACKET_BYTES, 0);
 import {
@@ -16,8 +22,9 @@ import {
   PacketType,
   type Run,
 } from "./packet.ts";
-import type { QrRate, RateSample } from "./rate.ts";
+import type { CameraRate, RateSample } from "./rate.ts";
 import { packetDecoder } from "./transferDecoder.ts";
+import { qrEncoder } from "./cameraCodec.ts";
 import {
   receiveBundle,
   type Received,
@@ -176,6 +183,16 @@ function qrDecoder(source: PacketSource) {
 
 function sound(channel: PacketChannel, listenEvery: number, windowMs: number) {
   return { listen: channel, sound: { channel, listenEvery, windowMs } };
+}
+
+/** A QR transfer's block count. */
+function qrK(bundle: Uint8Array): number {
+  return blockCount(bundle.length, QR_PACKET_BYTES);
+}
+
+/** QR packets sent, at most: fresh symbols plus blocks queued for resend. */
+function sentQr(p: SendProgress): number {
+  return p.cameraFresh + p.acked;
 }
 
 function isDone(bytes: Uint8Array): boolean {
@@ -351,7 +368,7 @@ Deno.test("a receiver turnaround longer than the sender's deaf time lets DONE la
   assertEquals((await received)?.items, items);
 });
 
-Deno.test("sendBundle needs sound or qr", async () => {
+Deno.test("sendBundle needs sound or camera", async () => {
   await assertRejects(
     () =>
       sendBundle(new Uint8Array(1), {
@@ -378,7 +395,10 @@ Deno.test("a QR-only transfer completes over lost codes and DONE goes out at onc
   });
   const sent = await sendBundle(bundle, {
     listen: air.party(),
-    qr: { display, packetsPerCode: 4, fps: 100 },
+    camera: {
+      encoder: qrEncoder(display),
+      rate: { packetsPerCode: 4, fps: 100 },
+    },
     signal: new AbortController().signal,
   });
 
@@ -389,14 +409,17 @@ Deno.test("a QR-only transfer completes over lost codes and DONE goes out at onc
   assertEquals((await received)?.items, items);
 });
 
-Deno.test("sendBundle takes sound or qr, not both", async () => {
+Deno.test("sendBundle takes sound or camera, not both", async () => {
   const air = new Air({ seed: 0 });
   const channel = air.party();
   await assertRejects(
     () =>
       sendBundle(new Uint8Array(1), {
         ...sound(channel, LISTEN_EVERY, WINDOW_MS),
-        qr: { display: new Display({ seed: 0 }), packetsPerCode: 1, fps: 1 },
+        camera: {
+          encoder: qrEncoder(new Display({ seed: 0 })),
+          rate: { packetsPerCode: 1, fps: 1 },
+        },
         signal: new AbortController().signal,
       }),
     RangeError,
@@ -413,7 +436,10 @@ Deno.test("an Ack queues its blocks ahead of fresh symbols", async () => {
 
   const sent = sendBundle(bundle, {
     listen,
-    qr: { display: new Display({ seed: 12 }), packetsPerCode: 4, fps: 100 },
+    camera: {
+      encoder: qrEncoder(new Display({ seed: 12 })),
+      rate: { packetsPerCode: 4, fps: 100 },
+    },
     signal: stop.signal,
     onProgress: (p) => {
       events.push(p);
@@ -422,7 +448,7 @@ Deno.test("an Ack queues its blocks ahead of fresh symbols", async () => {
       (listen as Party).hear(encodePacket({
         type: PacketType.Ack,
         transferId: p.transferId,
-        k: p.k,
+        k: qrK(bundle),
         symbolId: 0,
         data: encodeAck([{ start: 2, length: 3 }], 0, DATA_BYTES),
       }));
@@ -430,7 +456,7 @@ Deno.test("an Ack queues its blocks ahead of fresh symbols", async () => {
   });
 
   assertEquals(await sent, "stopped");
-  assert(events[0].k > 5);
+  assert(qrK(bundle) > 5);
   assertEquals(events[1].symbolIds.slice(0, 3), [2, 3, 4]);
   assertEquals(events[1].symbolIds[3], 4);
   assertEquals(events[1].acked, 3);
@@ -453,7 +479,10 @@ Deno.test("a source that delivers each code twice counts fresh once per symbol",
   });
   const sent = await sendBundle(bundle, {
     listen: air.party(),
-    qr: { display, packetsPerCode: 4, fps: 100 },
+    camera: {
+      encoder: qrEncoder(display),
+      rate: { packetsPerCode: 4, fps: 100 },
+    },
     signal: new AbortController().signal,
   });
 
@@ -485,7 +514,10 @@ Deno.test("a QR-only transfer whose DONE is lost gets DONE again after silence, 
   });
   const sent = await sendBundle(bundle, {
     listen: air.party(),
-    qr: { display, packetsPerCode: 4, fps: 50 },
+    camera: {
+      encoder: qrEncoder(display),
+      rate: { packetsPerCode: 4, fps: 50 },
+    },
     signal: new AbortController().signal,
   });
 
@@ -516,7 +548,7 @@ Deno.test("a QR receiver acks the blocks of dropped codes and the sender resends
   });
   const sent = await sendBundle(bundle, {
     listen: air.party(),
-    qr: { display, packetsPerCode, fps: 20 },
+    camera: { encoder: qrEncoder(display), rate: { packetsPerCode, fps: 20 } },
     signal: new AbortController().signal,
     onProgress: (p) => last = p,
   });
@@ -525,7 +557,7 @@ Deno.test("a QR receiver acks the blocks of dropped codes and the sender resends
   stopReceiver.abort();
   assertEquals((await received)?.items, items);
   assert(last);
-  assertEquals(last!.k, 18);
+  assertEquals(qrK(bundle), 18);
   assert(acks.length >= 1);
   // Acks before the first repair symbol name no blocks. A repair symbol may
   // peel a dropped block by luck before the ack, so the first ack with runs
@@ -538,7 +570,7 @@ Deno.test("a QR receiver acks the blocks of dropped codes and the sender resends
   ) => Array.from({ length }, (_, i) => start + i));
   assert(ackedBlocks.every((b) => dropped.has(b)));
   assert(blocks(3).some((b) => ackedBlocks.includes(b)));
-  assert(last!.qrSent < last!.k + 2 * packetsPerCode + 8);
+  assert(sentQr(last!) < qrK(bundle) + 2 * packetsPerCode + 8);
 });
 
 Deno.test("an LT-sized QR transfer with many dropped codes finishes in few symbols past k thanks to periodic acks", async () => {
@@ -562,7 +594,7 @@ Deno.test("an LT-sized QR transfer with many dropped codes finishes in few symbo
   });
   const sent = await sendBundle(bundle, {
     listen: air.party(),
-    qr: { display, packetsPerCode, fps: 50 },
+    camera: { encoder: qrEncoder(display), rate: { packetsPerCode, fps: 50 } },
     signal: new AbortController().signal,
     onProgress: (p) => last = p,
   });
@@ -570,10 +602,11 @@ Deno.test("an LT-sized QR transfer with many dropped codes finishes in few symbo
   assertEquals(sent, "done");
   stopReceiver.abort();
   assertEquals((await received)?.items, items);
-  assert(last!.k > DENSE_MAX_K, `k ${last!.k}`);
+  const k = qrK(bundle);
+  assert(k > DENSE_MAX_K, `k ${k}`);
   assert(acks >= 1);
   // 40 blocks were dropped; LT repair alone needs a few hundred symbols here.
-  assert(last!.qrSent < last!.k + 100, `${last!.qrSent} of k ${last!.k}`);
+  assert(sentQr(last!) < k + 100, `${sentQr(last!)} of k ${k}`);
 });
 
 Deno.test("dense repair finishes inside the ack period, so no ack goes out", async () => {
@@ -594,7 +627,10 @@ Deno.test("dense repair finishes inside the ack period, so no ack goes out", asy
   });
   const sent = await sendBundle(bundle, {
     listen: air.party(),
-    qr: { display, packetsPerCode: 4, fps: 20 },
+    camera: {
+      encoder: qrEncoder(display),
+      rate: { packetsPerCode: 4, fps: 20 },
+    },
     signal: new AbortController().signal,
   });
 
@@ -626,7 +662,10 @@ Deno.test("a QR transfer that completes during an ack's turnaround still gets DO
   });
   const sent = await sendBundle(bundle, {
     listen: air.party(),
-    qr: { display, packetsPerCode: 4, fps: 100 },
+    camera: {
+      encoder: qrEncoder(display),
+      rate: { packetsPerCode: 4, fps: 100 },
+    },
     signal: stopSender.signal,
   });
   clearTimeout(giveUp);
@@ -710,7 +749,10 @@ Deno.test("a QR receiver's acks report the highest id and fresh symbols heard, n
   });
   await sendBundle(bundle, {
     listen,
-    qr: { display, packetsPerCode: 4, fps: 20 },
+    camera: {
+      encoder: qrEncoder(display),
+      rate: { packetsPerCode: 4, fps: 20 },
+    },
     signal: stop.signal,
   });
   await received;
@@ -746,7 +788,10 @@ Deno.test("a receiver that starts looking late measures its share from the first
   });
   await sendBundle(bundle, {
     listen,
-    qr: { display, packetsPerCode: 4, fps: 20 },
+    camera: {
+      encoder: qrEncoder(display),
+      rate: { packetsPerCode: 4, fps: 20 },
+    },
     signal: stop.signal,
   });
   await received;
@@ -760,7 +805,7 @@ async function adaptiveSend(
   codes: number,
   acks: Record<number, { share?: number }>,
   silentAfter: number,
-  policy: (sample: RateSample) => QrRate,
+  policy: (sample: RateSample) => CameraRate,
 ) {
   const bundle = await encodeBundle(testItems(4_000));
   const listen = new Air({ seed: 17 }).party();
@@ -770,10 +815,9 @@ async function adaptiveSend(
 
   await sendBundle(bundle, {
     listen,
-    qr: {
-      display: new Display({ seed: 17 }),
-      packetsPerCode: 4,
-      fps: 100,
+    camera: {
+      encoder: qrEncoder(new Display({ seed: 17 })),
+      rate: { packetsPerCode: 4, fps: 100 },
       adapt: {
         silentAfter,
         policy: (sample) => {
@@ -792,7 +836,7 @@ async function adaptiveSend(
       (listen as Party).hear(encodePacket({
         type: PacketType.Ack,
         transferId: p.transferId,
-        k: p.k,
+        k: qrK(bundle),
         symbolId: 0,
         data: encodeAck([], 0, DATA_BYTES, ack.share),
       }));

@@ -7,9 +7,6 @@ export interface CameraRate {
   packetsPerCode?: number;
 }
 
-/** Old name, until its importers move to `CameraRate`. */
-export type QrRate = CameraRate;
-
 /** One ack's worth of what the receiver saw, all at `rate` as far as the sender knows. */
 export interface RateSample {
   rate: CameraRate;

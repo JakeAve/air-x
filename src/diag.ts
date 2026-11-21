@@ -1,10 +1,13 @@
-import { cameraCodecs, openDevices } from "@/adapters/pageLink.ts";
+import {
+  type cameraCodecs,
+  cameraSeconds,
+  openDevices,
+} from "@/adapters/pageLink.ts";
 import type { QrTransport } from "@/adapters/qrTransport.ts";
 import type { SoundTransport } from "@/adapters/soundTransport.ts";
 import { encodeBundle, type Item } from "@/lib/bundle.ts";
 import { OVERHEAD } from "@/lib/cameraCodec.ts";
 import { blockCount } from "@/lib/fountain/symbols.ts";
-import { ackShare, decodeAck, decodePacket, PacketType } from "@/lib/packet.ts";
 import { receiveBundle, sendBundle } from "@/lib/session.ts";
 import { PACKET_SECONDS, SOUND_PACKET_BYTES } from "@/lib/protocol.ts";
 import { type CameraRate, ladderPolicy, SILENT_AFTER } from "@/lib/rate.ts";
@@ -172,12 +175,6 @@ const sendBy = () =>
 
 type CodecName = keyof ReturnType<typeof cameraCodecs>;
 const cameraCodec = () => cameraCodecSelect.value as CodecName;
-// Encoders for the estimate before a gesture has opened the devices.
-const idleCodecs = cameraCodecs({
-  onPacket: () => () => {},
-  show() {},
-  clear() {},
-});
 
 function showCodecFields() {
   for (const el of document.querySelectorAll<HTMLElement>("[data-codec]")) {
@@ -363,7 +360,7 @@ function itemsChanged() {
     const soundN = Math.ceil(OVERHEAD * blockCount(bytes, SOUND_PACKET_BYTES));
     const { cameraRate, soundPerSecond } = rates();
     sendEstimate.textContent = `${size(bytes)} · ${
-      about(idleCodecs[cameraCodec()].encoder.seconds(bytes, cameraRate))
+      about(cameraSeconds[cameraCodec()](bytes, cameraRate))
     } by camera · ${about(soundN / soundPerSecond)} by sound`;
   }, 300);
 }
@@ -385,7 +382,6 @@ sendButton.addEventListener("click", async () => {
   const controller = new AbortController();
   running = controller;
   let stopTicker: (() => void) | undefined;
-  let stopAckLog: (() => void) | undefined;
   let result: "done" | "stopped" | undefined;
   try {
     const [{ sound, qr, codecs }, items] = await Promise.all([
@@ -446,19 +442,6 @@ sendButton.addEventListener("click", async () => {
           : `, sound ${sound.protocol} listenEvery ${listenEvery} window ${windowMs} ms`),
     );
     let transfer: number | undefined;
-    stopAckLog = sound.onPacket((bytes) => {
-      const packet = decodePacket(bytes);
-      if (packet?.type !== PacketType.Ack || packet.transferId !== transfer) {
-        return;
-      }
-      const runs = decodeAck(packet.data);
-      const share = ackShare(packet.data);
-      log(
-        `send: ack heard: ${
-          runs.reduce((sum, r) => sum + r.length, 0)
-        } blocks in ${runs.length} runs, heard ${percent(share)}`,
-      );
-    });
     // Past the first n packets the grid empties and refills once per pass.
     let pass = 0;
     let rateNow: CameraRate = cameraRate;
@@ -484,6 +467,12 @@ sendButton.addEventListener("click", async () => {
         }
         : undefined,
       signal: controller.signal,
+      onAck: (runs, share) =>
+        log(
+          `send: ack heard: ${
+            runs.reduce((sum, r) => sum + r.length, 0)
+          } blocks in ${runs.length} runs, heard ${percent(share)}`,
+        ),
       onProgress: (
         { transferId, k, soundSent, via, symbolIds, rate, share, freshBytes },
       ) => {
@@ -540,7 +529,6 @@ sendButton.addEventListener("click", async () => {
     log(`send failed: ${err}`);
   } finally {
     stopTicker?.();
-    stopAckLog?.();
     running = undefined;
     cameraFrame.hidden = true;
     sendRun.hidden = result !== "done";
@@ -776,10 +764,10 @@ listenButton.addEventListener("click", async () => {
     let soundStats = { heard: 0, rejected: 0 };
     const counts = () => {
       const heard = Object.keys(codecs).map((name) =>
-        `${name} ${decoders.find((d) => d.name === name)?.stats.heard ?? 0}`
+        `${name} ${decoders.find((d) => d.name === name)?.stats?.heard ?? 0}`
       );
       const rejected = decoders.reduce(
-        (sum, d) => sum + d.stats.rejected,
+        (sum, d) => sum + (d.stats?.rejected ?? 0),
         soundStats.rejected,
       );
       return `sound ${soundStats.heard}, ${
@@ -830,6 +818,8 @@ listenButton.addEventListener("click", async () => {
           }
           gridPaint("rx-grid", t.states());
           show("rx-count", `${Math.round(t.progress * t.k)} of ${t.k} blocks`);
+        } else if (t) {
+          show("rx-count", `${percent(t.progress)} heard`);
         }
       },
       onComplete: ({ transferId, items }) => {

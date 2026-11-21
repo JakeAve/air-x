@@ -74,11 +74,17 @@ Deno.test("repeats are not fresh; acks and DONE are not heard; repair counting s
   assertEquals(decoder.status().map((t) => t.transferId), [9]);
 });
 
-Deno.test("completion fires before the completing unit's report", () => {
+Deno.test("completion carries the completing unit's report, which onHeard does not get", () => {
   const { encoder, decoder, heard, send } = setup("first");
-  const events: string[] = [];
-  decoder.onComplete(() => events.push(`complete ${heard.length}`));
-  for (let id = 0; id < encoder.k; id++) send(id);
-  assertEquals(events, [`complete ${encoder.k - 1}`]);
-  assertEquals(heard.length, encoder.k);
+  const units: (TransferHeard | undefined)[] = [];
+  decoder.onComplete((_, __, unit) => units.push(unit));
+  for (let id = 0; id < encoder.k - 1; id++) send(id);
+  send(encoder.k - 1, PacketType.DataListen);
+  assertEquals(units, [{
+    transferId: 9,
+    fresh: 1,
+    counting: true,
+    listen: true,
+  }]);
+  assertEquals(heard.length, encoder.k - 1);
 });

@@ -36,13 +36,15 @@ export interface TransferStatus {
 
 export interface TransferDecoder {
   readonly name: string;
-  /**
-   * Every unit of a transfer heard. When a unit completes a transfer,
-   * `onComplete` fires first, then `onHeard` for that unit.
-   */
+  /** Every unit of a transfer heard, except one that completes it. */
   onHeard(listener: (h: TransferHeard) => void): () => void;
+  /** `unit`: the report for the unit that completed the transfer, which `onHeard` does not get. */
   onComplete(
-    listener: (transferId: number, bundle: Uint8Array) => void,
+    listener: (
+      transferId: number,
+      bundle: Uint8Array,
+      unit?: TransferHeard,
+    ) => void,
   ): () => void;
   /** The figures for an ack sent now; they become the base for the next `share`. */
   ack(transferId: number, maxRuns: number): AckReport | undefined;
@@ -79,7 +81,7 @@ export function packetDecoder(
   const stats: PacketStats = { heard: 0, fresh: 0, rejected: 0 };
   const heardListeners = new Set<(h: TransferHeard) => void>();
   const completeListeners = new Set<
-    (transferId: number, bundle: Uint8Array) => void
+    (transferId: number, bundle: Uint8Array, unit?: TransferHeard) => void
   >();
   const seenSymbols = new Set<number>();
   /** Per transfer: the highest symbol id heard, and how many arrived above the highest before them. Fresh symbols go out in id order and resends are always lower, so `heard` counts fresh ones. */
@@ -117,16 +119,17 @@ export function packetDecoder(
     if (symbolId >= packet.k) repairing.add(transferId);
 
     const completed = receiver.push(packet, Date.now());
-    if (completed) {
-      for (const l of completeListeners) l(transferId, completed.bundle);
-    }
     const heard: TransferHeard = {
       transferId,
       fresh: isNew ? 1 : 0,
       counting: options.countFrom === "first" || repairing.has(transferId),
     };
     if (packet.type === PacketType.DataListen) heard.listen = true;
-    for (const l of heardListeners) l(heard);
+    if (completed) {
+      for (const l of completeListeners) l(transferId, completed.bundle, heard);
+    } else {
+      for (const l of heardListeners) l(heard);
+    }
   });
 
   const listen = <T>(set: Set<T>, l: T) => {

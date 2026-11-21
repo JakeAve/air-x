@@ -42,6 +42,11 @@ export interface CameraEncoder {
   seconds(bundleBytes: number, rate: CameraRate): number;
 }
 
+/** Expected seconds to send a bundle of this size by QR at this rate. */
+export const qrSeconds = (bundleBytes: number, rate: CameraRate): number =>
+  Math.ceil(OVERHEAD * blockCount(bundleBytes, QR_PACKET_BYTES)) /
+  ((rate.packetsPerCode ?? 1) * rate.fps);
+
 /** QR codes of `packetsPerCode` 128-byte packets at `fps`, queued blocks first. */
 export function qrEncoder(display: PacketDisplay): CameraEncoder {
   return {
@@ -86,8 +91,6 @@ export function qrEncoder(display: PacketDisplay): CameraEncoder {
         done: run(),
       };
     },
-    seconds: (bundleBytes, rate) =>
-      Math.ceil(OVERHEAD * blockCount(bundleBytes, QR_PACKET_BYTES)) /
-      ((rate.packetsPerCode ?? 1) * rate.fps),
+    seconds: qrSeconds,
   };
 }

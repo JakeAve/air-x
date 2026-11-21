@@ -70,13 +70,15 @@ export interface SendOptions {
   camera?: CameraSend;
   signal: AbortSignal;
   onProgress?: (p: SendProgress) => void;
+  /** Every ack of this transfer heard: its runs, and its share heard when known. */
+  onAck?: (runs: Run[], share?: number) => void;
 }
 
 export async function sendBundle(
   bundle: Uint8Array,
   options: SendOptions,
 ): Promise<"done" | "stopped"> {
-  const { listen, sound, camera, signal, onProgress } = options;
+  const { listen, sound, camera, signal, onProgress, onAck } = options;
   if (!sound && !camera) {
     throw new RangeError("sendBundle needs sound or camera");
   }
@@ -140,7 +142,9 @@ export async function sendBundle(
       everAcked = true;
       if (heard !== undefined) retune({ heard });
     }
-    acked += (stream ?? sending)?.resend(decodeAck(packet.data)) ?? 0;
+    const runs = decodeAck(packet.data);
+    onAck?.(runs, heard);
+    acked += (stream ?? sending)?.resend(runs) ?? 0;
   });
 
   try {
@@ -256,10 +260,6 @@ export function receiveBundle(
     let ackPending: number | undefined;
     /** Completion's DONE-or-silence step, held while an ack is in flight. */
     let afterAck: (() => void) | undefined;
-    /** The transfer just completed, waiting for its completing unit's report. */
-    let completing:
-      | { decoder: TransferDecoder; transferId: number; listen: boolean }
-      | undefined;
 
     const claim = (decoder: TransferDecoder, transferId: number) => {
       const o = owner.get(transferId);
@@ -406,13 +406,16 @@ export function receiveBundle(
     (
       transferId: number,
       bundle: Uint8Array,
+      unit?: TransferHeard,
     ) => {
       if (finished || !claim(decoder, transferId)) return;
-      const c = { decoder, transferId, listen: false };
-      completing = c;
+      const fromSound = decoder === soundDecoder;
+      if (fromSound && !received) lastSound.set(transferId, Date.now());
+      const at = { listen: fromSound && unit?.listen === true };
       completions = completions
-        .then(() => complete(decoder, transferId, bundle, c))
+        .then(() => complete(decoder, transferId, bundle, at))
         .catch(finish);
+      if (!fromSound) progress();
     };
 
     const onHeard = (decoder: TransferDecoder) => (h: TransferHeard) => {
@@ -421,24 +424,21 @@ export function receiveBundle(
       const fromSound = decoder === soundDecoder;
       const soundListen = fromSound && h.listen === true;
       if (fromSound && !received) lastSound.set(transferId, Date.now());
-      if (
-        completing?.decoder === decoder && completing.transferId === transferId
-      ) {
-        completing.listen = soundListen;
-        completing = undefined;
-      } else if (received?.transferId === transferId) {
+      if (received?.transferId === transferId) {
         if (doneSent) heardSinceDone = true;
         if (soundListen) sendDone();
         else if (fromSound) armSilence();
-      } else if (
-        ackEvery !== undefined && !received && claim(decoder, transferId)
-      ) {
-        if (h.fresh > 0 && h.counting) {
-          const heard = (heardSince.get(transferId) ?? 0) + h.fresh;
-          heardSince.set(transferId, heard);
-          if (heard >= ackEvery) tryAck(transferId);
+      } else if (!received) {
+        // One transfer shows once in progress: its owner's.
+        if (!claim(decoder, transferId)) return;
+        if (ackEvery !== undefined) {
+          if (h.fresh > 0 && h.counting) {
+            const heard = (heardSince.get(transferId) ?? 0) + h.fresh;
+            heardSince.set(transferId, heard);
+            if (heard >= ackEvery) tryAck(transferId);
+          }
+          if (soundListen && ackPending === transferId) sendAck(transferId);
         }
-        if (soundListen && ackPending === transferId) sendAck(transferId);
       }
       // Sound progress goes out on every packet, below; camera's here.
       if (!fromSound) progress();

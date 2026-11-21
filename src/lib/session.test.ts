@@ -952,7 +952,7 @@ class ShareOnlyLink {
   decoder(): TransferDecoder {
     const heardListeners = new Set<(h: TransferHeard) => void>();
     const completeListeners = new Set<
-      (transferId: number, bundle: Uint8Array) => void
+      (transferId: number, bundle: Uint8Array, unit?: TransferHeard) => void
     >();
     const seen = new Map<number, Set<number>>();
     const highest = new Map<number, number>();
@@ -972,11 +972,13 @@ class ShareOnlyLink {
       const fresh = frames.has(frame) ? 0 : 1;
       frames.add(frame);
       highest.set(transferId, Math.max(highest.get(transferId) ?? -1, frame));
+      const unit: TransferHeard = { transferId, fresh, counting: true };
       if (fresh && frames.size === this.#need) {
         const bundle = this.#bundles.get(transferId)!;
-        for (const l of completeListeners) l(transferId, bundle);
+        for (const l of completeListeners) l(transferId, bundle, unit);
+      } else {
+        for (const l of heardListeners) l(unit);
       }
-      for (const l of heardListeners) l({ transferId, fresh, counting: true });
     };
     this.#listeners.add(onFrame);
     return {
@@ -1043,6 +1045,7 @@ Deno.test("a share-only camera codec's acks carry its share and no runs, and the
   const stopReceiver = new AbortController();
   const wire: { k: number; runs: Run[]; share?: number }[] = [];
   const samples: RateSample[] = [];
+  const heardAcks: typeof wire = [];
   const listen = air.party();
   listen.onPacket((bytes) => {
     const packet = decodePacket(bytes)!;
@@ -1075,6 +1078,7 @@ Deno.test("a share-only camera codec's acks carry its share and no runs, and the
       },
     },
     signal: new AbortController().signal,
+    onAck: (runs, share) => heardAcks.push({ k: 0, runs, share }),
   });
 
   assertEquals(sent, "done");
@@ -1088,6 +1092,7 @@ Deno.test("a share-only camera codec's acks carry its share and no runs, and the
     wire,
     link.reports.map((r) => ({ k: 0, runs: [], share: percent(r.share) })),
   );
+  assertEquals(heardAcks, wire);
   assertEquals(
     samples,
     link.reports.map((r) => ({ rate: { fps: 100 }, heard: percent(r.share) })),

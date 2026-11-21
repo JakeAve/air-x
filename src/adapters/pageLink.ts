@@ -1,7 +1,8 @@
 import { CodecWorker } from "./codecWorker.ts";
 import { SoundTransport } from "./soundTransport.ts";
 import { QrTransport } from "./qrTransport.ts";
-import { type CameraEncoder, qrEncoder } from "@/lib/cameraCodec.ts";
+import { type CameraEncoder, qrEncoder, qrSeconds } from "@/lib/cameraCodec.ts";
+import type { CameraRate } from "@/lib/rate.ts";
 import type { PacketDisplay, PacketSource } from "@/lib/channel.ts";
 import {
   packetDecoder,
@@ -11,8 +12,14 @@ import {
 
 export interface CameraCodec {
   encoder: CameraEncoder;
-  decoder: () => TransferDecoder & { readonly stats: PacketStats };
+  decoder: () => TransferDecoder & { readonly stats?: PacketStats };
 }
+
+/** Each camera codec's send estimate, usable before any device is open. */
+export const cameraSeconds: Record<
+  "qr",
+  (bytes: number, rate: CameraRate) => number
+> = { qr: qrSeconds };
 
 /** Every camera codec the page offers, by the name the codec select uses. */
 export function cameraCodecs(

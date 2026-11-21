@@ -23,8 +23,13 @@ import {
   type Run,
 } from "./packet.ts";
 import type { CameraRate, RateSample } from "./rate.ts";
-import { packetDecoder } from "./transferDecoder.ts";
-import { qrEncoder } from "./cameraCodec.ts";
+import {
+  type AckReport,
+  packetDecoder,
+  type TransferDecoder,
+  type TransferHeard,
+} from "./transferDecoder.ts";
+import { type CameraEncoder, qrEncoder } from "./cameraCodec.ts";
 import {
   receiveBundle,
   type Received,
@@ -887,4 +892,235 @@ Deno.test("an adaptive QR sender ignores silence before any ack: no one may be l
 
   assertEquals(samples, []);
   assertEquals(sizes, [4, 4, 4, 4, 4, 4]);
+});
+
+/**
+ * A cimbar-like codec: frames are opaque (a transfer id and a frame number),
+ * name no blocks, and the decoder completes after `need` distinct frames. The
+ * bundle rides along out of band, so `decodeBundle` still sees real bytes.
+ */
+class ShareOnlyLink {
+  readonly #random: () => number;
+  readonly #loss: number;
+  readonly #need: number;
+  readonly #bundles = new Map<number, Uint8Array>();
+  readonly #listeners = new Set<(transferId: number, frame: number) => void>();
+  /** Every report `ack` returned, for checking against the wire. */
+  readonly reports: AckReport[] = [];
+
+  constructor(options: { seed: number; loss: number; need: number }) {
+    this.#random = seededRandom(options.seed);
+    this.#loss = options.loss;
+    this.#need = options.need;
+  }
+
+  encoder(): CameraEncoder {
+    return {
+      name: "share-only",
+      start: (bundle, transferId, rate, signal, onFrame) => {
+        this.#bundles.set(transferId, bundle);
+        let frames = 0;
+        const run = async () => {
+          await null;
+          try {
+            while (!signal.aborted) {
+              const shown = rate;
+              const frame = frames++;
+              if (this.#random() >= this.#loss) {
+                for (const l of this.#listeners) l(transferId, frame);
+              }
+              onFrame?.({ frames, fresh: frames, freshBytes: 0, rate: shown });
+              await sleep(1000 / rate.fps, signal);
+            }
+          } catch (err) {
+            if (!signal.aborted) throw err;
+          }
+        };
+        return {
+          setRate: (next) => rate = next,
+          resend: () => 0,
+          get fresh() {
+            return frames;
+          },
+          done: run(),
+        };
+      },
+      seconds: (_, rate) => this.#need / rate.fps,
+    };
+  }
+
+  decoder(): TransferDecoder {
+    const heardListeners = new Set<(h: TransferHeard) => void>();
+    const completeListeners = new Set<
+      (transferId: number, bundle: Uint8Array) => void
+    >();
+    const seen = new Map<number, Set<number>>();
+    const highest = new Map<number, number>();
+    /** Per transfer, as of the last ack: highest frame and distinct count. */
+    const base = new Map<number, { highest: number; heard: number }>();
+    const listen = <T>(set: Set<T>, l: T) => {
+      set.add(l);
+      return () => void set.delete(l);
+    };
+    const onFrame = (transferId: number, frame: number) => {
+      let frames = seen.get(transferId);
+      if (!frames) {
+        frames = new Set();
+        seen.set(transferId, frames);
+        base.set(transferId, { highest: frame - 1, heard: 0 });
+      }
+      const fresh = frames.has(frame) ? 0 : 1;
+      frames.add(frame);
+      highest.set(transferId, Math.max(highest.get(transferId) ?? -1, frame));
+      if (fresh && frames.size === this.#need) {
+        const bundle = this.#bundles.get(transferId)!;
+        for (const l of completeListeners) l(transferId, bundle);
+      }
+      for (const l of heardListeners) l({ transferId, fresh, counting: true });
+    };
+    this.#listeners.add(onFrame);
+    return {
+      name: "share-only",
+      onHeard: (l) => listen(heardListeners, l),
+      onComplete: (l) => listen(completeListeners, l),
+      ack: (transferId) => {
+        const frames = seen.get(transferId);
+        if (!frames) return undefined;
+        const top = highest.get(transferId)!;
+        const from = base.get(transferId)!;
+        const span = top - from.highest;
+        base.set(transferId, { highest: top, heard: frames.size });
+        const report: AckReport = {
+          k: 0,
+          highest: top,
+          heard: frames.size,
+          share: span > 0 ? (frames.size - from.heard) / span : undefined,
+          runs: [],
+        };
+        this.reports.push(report);
+        return report;
+      },
+      status: () =>
+        [...seen].map(([transferId, frames]) => ({
+          transferId,
+          progress: Math.min(1, frames.size / this.#need),
+        })),
+      forget: (transferId) => void seen.delete(transferId),
+      close: () => void this.#listeners.delete(onFrame),
+    };
+  }
+}
+
+Deno.test("a share-only camera codec completes and the sender hears DONE", async () => {
+  const items = testItems();
+  const bundle = await encodeBundle(items);
+  const air = new Air({ seed: 20 });
+  const link = new ShareOnlyLink({ seed: 20, loss: 0.3, need: 12 });
+  const stopReceiver = new AbortController();
+
+  const received = receiveBundle({
+    sound: air.party(),
+    camera: [link.decoder()],
+    silenceMs: 60_000,
+    signal: stopReceiver.signal,
+  });
+  const sent = await sendBundle(bundle, {
+    listen: air.party(),
+    camera: { encoder: link.encoder(), rate: { fps: 100 } },
+    signal: new AbortController().signal,
+  });
+
+  assertEquals(sent, "done");
+  stopReceiver.abort();
+  assertEquals((await received)?.items, items);
+});
+
+Deno.test("a share-only camera codec's acks carry its share and no runs, and the policy gets each as a sample", async () => {
+  const items = testItems();
+  const bundle = await encodeBundle(items);
+  const air = new Air({ seed: 21 });
+  const link = new ShareOnlyLink({ seed: 21, loss: 0.3, need: 40 });
+  const stopReceiver = new AbortController();
+  const wire: { k: number; runs: Run[]; share?: number }[] = [];
+  const samples: RateSample[] = [];
+  const listen = air.party();
+  listen.onPacket((bytes) => {
+    const packet = decodePacket(bytes)!;
+    if (packet.type !== PacketType.Ack) return;
+    wire.push({
+      k: packet.k,
+      runs: decodeAck(packet.data),
+      share: ackShare(packet.data),
+    });
+  });
+
+  const received = receiveBundle({
+    sound: air.party(),
+    camera: [link.decoder()],
+    silenceMs: 60_000,
+    ackEvery: 8,
+    signal: stopReceiver.signal,
+  });
+  const sent = await sendBundle(bundle, {
+    listen,
+    camera: {
+      encoder: link.encoder(),
+      rate: { fps: 100 },
+      adapt: {
+        silentAfter: 1_000,
+        policy: (sample) => {
+          samples.push(sample);
+          return sample.rate;
+        },
+      },
+    },
+    signal: new AbortController().signal,
+  });
+
+  assertEquals(sent, "done");
+  stopReceiver.abort();
+  assertEquals((await received)?.items, items);
+  assert(link.reports.length >= 3);
+  // Lossy frames: some share below 1, every share a real figure.
+  assert(link.reports.some((r) => r.share! < 1));
+  const percent = (s?: number) => Math.round(s! * 100) / 100;
+  assertEquals(
+    wire,
+    link.reports.map((r) => ({ k: 0, runs: [], share: percent(r.share) })),
+  );
+  assertEquals(
+    samples,
+    link.reports.map((r) => ({ rate: { fps: 100 }, heard: percent(r.share) })),
+  );
+});
+
+Deno.test("a share-only camera transfer whose DONE is lost gets DONE again after silence", async () => {
+  const items = testItems();
+  const bundle = await encodeBundle(items);
+  let dropped = 0;
+  const air = new Air({
+    seed: 22,
+    drop: (bytes) => isDone(bytes) && dropped++ === 0,
+  });
+  const link = new ShareOnlyLink({ seed: 22, loss: 0.3, need: 12 });
+  const dones: number[] = [];
+  const start = Date.now();
+
+  const received = receiveBundle({
+    sound: air.party(),
+    camera: [link.decoder()],
+    silenceMs: SILENCE_MS,
+    signal: new AbortController().signal,
+    onDone: () => dones.push(Date.now() - start),
+  });
+  const sent = await sendBundle(bundle, {
+    listen: air.party(),
+    camera: { encoder: link.encoder(), rate: { fps: 50 } },
+    signal: new AbortController().signal,
+  });
+
+  assertEquals(sent, "done");
+  assertEquals((await received)?.items, items);
+  assertEquals(dones.length, 2);
+  assert(dones[1] - dones[0] >= SILENCE_MS);
 });

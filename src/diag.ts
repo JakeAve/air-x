@@ -438,8 +438,8 @@ sendButton.addEventListener("click", async () => {
         { transferId, k, soundSent, qrSent, via, symbolIds, acked, rate },
       ) => {
         const sent = soundSent + qrSent;
-        if (rate && rate.packetsPerCode * rate.fps !== rateNow) {
-          rateNow = rate.packetsPerCode * rate.fps;
+        if (rate && (rate.packetsPerCode ?? 1) * rate.fps !== rateNow) {
+          rateNow = (rate.packetsPerCode ?? 1) * rate.fps;
           log(`send: rate now ${rate.packetsPerCode}/code @ ${rate.fps} fps`);
         }
         if (acked > ackedSoFar) {

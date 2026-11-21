@@ -165,7 +165,7 @@ export async function sendBundle(
         progress("sound", symbols.map((s) => s.symbolId));
         await sleep(windowMs, stop);
       } else if (qr) {
-        const symbols = batch(rate.packetsPerCode, PacketType.Data);
+        const symbols = batch(rate.packetsPerCode ?? 1, PacketType.Data);
         qr.display.show(symbols.map(encodePacket));
         qrSent += symbols.length;
         codes++;

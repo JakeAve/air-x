@@ -51,7 +51,7 @@ Open Sans, self-hosted variable file at `static/fonts/open-sans.woff2` (weights
 
 | Role                                             | Size                                      | Weight         | Case                                                        |
 | ------------------------------------------------ | ----------------------------------------- | -------------- | ----------------------------------------------------------- |
-| App title (`.app`)                               | 0.9375rem                                 | 600            | Sentence case: `Air X`                                      |
+| App title (`.app`, the link home)                | 0.9375rem                                 | 600            | Sentence case: `Air X`                                      |
 | Page title (`h1`)                                | 4rem, line-height 0.95, tracking -0.025em | 300            | lowercase, one word: `send`, `sending`, `sent`              |
 | Group heading (`h2`), progress count             | 1.5rem                                    | 300            | Sentence case for group headings; progress count as written |
 | Controls: button text                            | 1.25rem                                   | 600            | Sentence case                                               |
@@ -62,8 +62,7 @@ Open Sans, self-hosted variable file at `static/fonts/open-sans.woff2` (weights
 Lowercase is for the big light words only: page titles, tiles and the home
 wordmark `air x`. No all caps anywhere. Group headings, expander summaries, and
 anything a person reads as an instruction or a value is sentence case with real
-capitals (`QR code`, `Start over`, `Scan QR with
-camera`).
+capitals (`QR code`, `Scan QR with camera`).
 
 ## Spacing
 
@@ -127,11 +126,12 @@ inside a `.stack` sit 1rem apart; label to control is 0.5rem; two-up `.row` and
 The page is one document with one `<section class="screen">` per step, ids
 `screen-<name>`, picked by `location.hash` (`SCREENS` in `src/diag.ts`).
 Changing screens aborts whatever the old one was running. Every screen after
-home opens with the strip (`.strip`: app title left, `Start over` link to
-`#home` right) and an `h1`. A step that runs a transfer keeps its form in a
-`*-form` div and its live view in a `*-run` div; the button below both flips
-label and `.primary`, and the title moves through present participle and past
-tense (`send`, `sending`, `sent`).
+home opens with the strip (`.strip`: one `.app` link, `‹ Air X`, to `#home` on
+the left; the chevron is inline SVG in solid `--accent`) and an `h1`. Home has
+no strip: its `air x` wordmark already names the app. A step that runs a
+transfer keeps its form in a `*-form` div and its live view in a `*-run` div;
+the button below both flips label and `.primary`, and the title moves through
+present participle and past tense (`send`, `sending`, `sent`).
 
 Motion: each direct child of a shown `.screen` swings in from its left edge
 (`@keyframes enter`, staggered by `nth-child`), so a screen change or a form/run

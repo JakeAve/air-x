@@ -30,7 +30,6 @@
   <body>
     <main id="main" data-screen="home">
       <section id="screen-home" class="screen">
-        <header class="strip"><span class="app">Air X</span></header>
         <h1>air x</h1>
         <p
           class="lede">Transfer data between devices without a network connection. Use sound or a QR code.</p>
@@ -51,8 +50,12 @@
       </section>
 
       <section id="screen-send" class="screen" hidden>
-        <header
-          class="strip"><span class="app">Air X</span><a href="#home">Start over</a></header>
+        <header class="strip">
+          <a class="app"
+            href="#home"><svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M15 6l-6 6 6 6" />
+            </svg>Air X</a>
+        </header>
         <h1 id="send-title">send</h1>
         <div id="send-form" class="stack">
           <label>Text
@@ -137,8 +140,12 @@
       </section>
 
       <section id="screen-receive" class="screen" hidden>
-        <header
-          class="strip"><span class="app">Air X</span><a href="#home">Start over</a></header>
+        <header class="strip">
+          <a class="app"
+            href="#home"><svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M15 6l-6 6 6 6" />
+            </svg>Air X</a>
+        </header>
         <h1 id="receive-title">receive</h1>
         <div id="receive-form" class="stack">
           <label class="switch">Scan QR with camera

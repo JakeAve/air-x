@@ -6,6 +6,8 @@ import {
 import type { QrTransport } from "@/adapters/qrTransport.ts";
 import type { SoundTransport } from "@/adapters/soundTransport.ts";
 import { copyBlob, openType } from "@/adapters/clipboard.ts";
+import { record } from "@/adapters/library.ts";
+import type { LibraryEvent } from "@/lib/library.ts";
 import {
   leaveLibrary,
   renderHomeTile,
@@ -68,10 +70,23 @@ const ackEveryInput = $<HTMLInputElement>("ack-every");
 const listenButton = $<HTMLButtonElement>("listen");
 const receivedItems = $<HTMLUListElement>("received-items");
 const logEl = $<HTMLPreElement>("log");
+const savedLine = $<HTMLParagraphElement>("saved");
 
 function log(line: string) {
   const time = new Date().toISOString().slice(11, 23);
   logEl.textContent += `${time} ${line}\n`;
+}
+
+/** Saves to the library; never throws, so a failed save only logs. */
+async function save(items: Item[], event: LibraryEvent): Promise<boolean> {
+  try {
+    await record(items, event);
+    log(`library: saved ${items.length} item(s)`);
+    return true;
+  } catch (err) {
+    log(`library: save failed: ${err}`);
+    return false;
+  }
 }
 
 function show(id: string, value: string | number) {
@@ -472,6 +487,18 @@ sendButton.addEventListener("click", async () => {
           .toFixed(1)
       } KB/s`;
     let lastLine = "";
+    // Recorded once, when every source block has gone out at least once.
+    let recorded = false;
+    const recordSent = () => {
+      if (recorded) return;
+      recorded = true;
+      save(items, {
+        direction: "sent",
+        at: Date.now(),
+        via: by === "camera" ? "qr" : "sound",
+        ms: performance.now() - start,
+      });
+    };
     result = await sendBundle(bundle, {
       listen: sound,
       sound: by === "sound"
@@ -502,6 +529,7 @@ sendButton.addEventListener("click", async () => {
             `send: transfer ${transferId}${k === undefined ? "" : `, k ${k}`}`,
           );
         }
+        if (freshBytes >= bundle.length) recordSent();
         if (via === "camera") {
           if (
             rate &&
@@ -539,6 +567,7 @@ sendButton.addEventListener("click", async () => {
         : `send: stopped after ${elapsed}`,
     );
     if (result === "done") {
+      recordSent();
       stopTicker();
       stopTicker = undefined;
       $("send-grid").hidden = true;
@@ -723,6 +752,7 @@ listenButton.addEventListener("click", async () => {
   listenButton.textContent = "Stop";
   listenButton.classList.remove("primary");
   gridReset("rx-grid", 0, 1, 1);
+  savedLine.hidden = true;
   show("rx-count", "waiting for a transfer");
   let scanReport: ReturnType<typeof setInterval> | undefined;
   let decoders: ReturnType<Devices["codecs"][CodecName]["decoder"]>[] = [];
@@ -819,7 +849,7 @@ listenButton.addEventListener("click", async () => {
             : `${percent(t.progress)} heard`,
         );
       },
-      onComplete: ({ transferId, items }) => {
+      onComplete: ({ transferId, items, via }) => {
         received = true;
         $("rx-grid").hidden = true;
         // The bundle is whole, so no code is needed; DONE goes on by sound.
@@ -832,6 +862,17 @@ listenButton.addEventListener("click", async () => {
           }, ${items.length} item(s), ${counts()}`,
         );
         items.forEach(renderItem);
+        save(items, {
+          direction: "received",
+          at: Date.now(),
+          via: via === "sound" ? "sound" : "qr",
+          ms: performance.now() - start,
+        }).then((ok) => {
+          savedLine.textContent = ok
+            ? "Saved to library"
+            : "Couldn't save to library";
+          savedLine.hidden = false;
+        });
       },
       onDone: (transferId) => {
         stopTicker?.();

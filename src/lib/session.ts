@@ -194,6 +194,8 @@ export interface ReceiveProgress {
 export interface Received {
   transferId: number;
   items: Item[];
+  /** The name of the decoder the transfer belongs to: "sound", or a camera codec's. */
+  via: string;
 }
 
 export interface ReceiveOptions {
@@ -389,7 +391,7 @@ export function receiveBundle(
         return;
       }
       if (finished) return;
-      received = { transferId, items };
+      received = { transferId, items, via: decoder.name };
       const soundAt = lastSound.get(transferId);
       lastSound.clear();
       onComplete?.(received);

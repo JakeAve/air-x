@@ -1,5 +1,14 @@
 import { type Packet, PacketType, type Run } from "../packet.ts";
-import { ACK_MAX_RUN, MAX_BUNDLE_BYTES } from "../protocol.ts";
+import { ACK_MAX_RUN, DENSE_MAX_K, MAX_BUNDLE_BYTES } from "../protocol.ts";
+import {
+  type Code,
+  ltRow,
+  makeCode,
+  type Solver,
+  symbolData,
+  symbolSolver,
+  wordStride,
+} from "./raptor.ts";
 import { blockSet } from "./symbols.ts";
 
 // Bounds one elimination to about 512² bit operations; above it peeling alone
@@ -26,6 +35,7 @@ export class Decoder {
   // Each symbol lowers the unknowns left after elimination by at most one, so
   // after a failed elimination wait that many new symbols before retrying.
   #eliminateAfter = 0;
+  #raptor?: RaptorState;
 
   get transferId(): number | undefined {
     return this.#transferId;
@@ -42,8 +52,16 @@ export class Decoder {
   /** Per block: 0 unseen, 1 covered by a pending symbol, 2 resolved. */
   states(): Uint8Array {
     const out = new Uint8Array(this.#k ?? 0);
+    // A repair symbol above DENSE_MAX_K covers intermediates, not blocks, so
+    // each one heard marks the next missing block tentative instead.
+    let repairs = this.#raptor?.repairs ?? 0;
     for (let b = 0; b < out.length; b++) {
-      out[b] = this.#isResolved[b] ? 2 : this.#pendingByBlock[b].size ? 1 : 0;
+      if (this.#isResolved[b]) out[b] = 2;
+      else if (this.#pendingByBlock[b]?.size) out[b] = 1;
+      else if (repairs > 0) {
+        out[b] = 1;
+        repairs--;
+      }
     }
     return out;
   }
@@ -87,7 +105,22 @@ export class Decoder {
       this.#dataBytes = packet.data.length;
       this.#blocks = new Uint8Array(packet.k * this.#dataBytes);
       this.#isResolved = new Uint8Array(packet.k);
-      this.#pendingByBlock = Array.from({ length: packet.k }, () => new Set());
+      if (packet.k > DENSE_MAX_K) {
+        const code = makeCode(packet.k);
+        const stride = wordStride(this.#dataBytes);
+        this.#raptor = {
+          code,
+          stride,
+          isis: [],
+          blocks: new Uint32Array(64 * stride),
+          repairs: 0,
+        };
+      } else {
+        this.#pendingByBlock = Array.from(
+          { length: packet.k },
+          () => new Set(),
+        );
+      }
     }
     if (
       packet.transferId !== this.#transferId || packet.k !== this.#k ||
@@ -97,6 +130,7 @@ export class Decoder {
     }
     if (this.#seen.has(packet.symbolId)) return undefined;
     this.#seen.add(packet.symbolId);
+    if (this.#raptor) return this.#pushRaptor(this.#raptor, packet);
 
     const data = packet.data.slice();
     const blocks = new Set<number>();
@@ -123,6 +157,69 @@ export class Decoder {
     }
 
     return this.#resolved === this.#k ? this.#blocks : undefined;
+  }
+
+  // Every symbol is an equation over the intermediate blocks; source symbols
+  // also land in the output at once. Once there are as many equations as
+  // unknowns, solve; a solver short of rank takes each later symbol as one
+  // more row.
+  #pushRaptor(state: RaptorState, packet: Packet): Uint8Array | undefined {
+    const { code, stride } = state;
+    const k = this.#k!;
+    if (packet.symbolId < k && !this.#isResolved[packet.symbolId]) {
+      this.#blocks.set(packet.data, packet.symbolId * this.#dataBytes);
+      this.#isResolved[packet.symbolId] = 1;
+      if (++this.#resolved === k) return this.#done();
+    }
+    if (packet.symbolId >= k) state.repairs++;
+    const isi = packet.symbolId < k
+      ? packet.symbolId
+      : packet.symbolId - k + code.kPad;
+    if (state.solver) {
+      const block = new Uint32Array(stride);
+      new Uint8Array(block.buffer).set(packet.data);
+      state.solver.add(ltRow(code, isi), block);
+    } else {
+      const n = state.isis.length;
+      if ((n + 1) * stride > state.blocks.length) {
+        const grown = new Uint32Array(state.blocks.length * 2);
+        grown.set(state.blocks);
+        state.blocks = grown;
+      }
+      new Uint8Array(state.blocks.buffer).set(packet.data, n * stride * 4);
+      state.isis.push(isi);
+      if (state.isis.length < k) return undefined;
+      const isis = [...state.isis];
+      const index = new Int32Array(code.kPad + n + 1 - k).fill(-1);
+      for (let i = 0; i <= n; i++) index[i] = i;
+      for (let i = k; i < code.kPad; i++) isis.push(i);
+      state.solver = symbolSolver(code, isis, {
+        blocks: state.blocks,
+        index,
+        stride,
+      });
+    }
+    const intermediates = state.solver.intermediates();
+    if (!intermediates) return undefined;
+    for (let b = 0; b < k; b++) {
+      if (this.#isResolved[b]) continue;
+      const offset = b * this.#dataBytes;
+      symbolData(
+        code,
+        intermediates,
+        stride,
+        b,
+        this.#blocks.subarray(offset, offset + this.#dataBytes),
+      );
+      this.#isResolved[b] = 1;
+    }
+    this.#resolved = k;
+    return this.#done();
+  }
+
+  #done(): Uint8Array {
+    this.#raptor = undefined;
+    return this.#blocks;
   }
 
   #resolve(block: number, data: Uint8Array): void {
@@ -215,6 +312,18 @@ export class Decoder {
       data[i] ^= this.#blocks[offset + i];
     }
   }
+}
+
+interface RaptorState {
+  code: Code;
+  stride: number;
+  /** Row of each symbol heard, in arrival order; its data is at the same index in `blocks`. */
+  isis: number[];
+  blocks: Uint32Array;
+  /** Repair symbols heard, for `states`. */
+  repairs: number;
+  /** Set once there were enough symbols to try. */
+  solver?: Solver;
 }
 
 function popcount(x: number): number {

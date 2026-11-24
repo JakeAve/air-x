@@ -230,7 +230,7 @@ Deno.test("compact packet round-trips at 64 and 128 bytes", () => {
     };
     const bytes = encodePacket(packet);
     assertEquals(bytes.length, length);
-    assertEquals([...bytes.subarray(0, 8)], [0x41, 1, 2, 255, 255, 255, 0, 1]);
+    assertEquals([...bytes.subarray(0, 8)], [0x51, 1, 2, 255, 255, 255, 0, 1]);
     assertEquals(decodePacket(bytes), packet);
   }
 });
@@ -248,7 +248,7 @@ Deno.test("wide packet round-trips at k 256", () => {
     assertEquals(bytes.length, length);
     assertEquals(
       [...bytes.subarray(0, 11)],
-      [0x4b, 1, 2, 0, 1, 0, 3, 4, 5, 0, 1],
+      [0x5b, 1, 2, 0, 1, 0, 3, 4, 5, 0, 1],
     );
     assertEquals(decodePacket(bytes), packet);
   }
@@ -278,7 +278,7 @@ Deno.test("a Done packet with k 0 is compact", () => {
     symbolId: 0,
     data: new Uint8Array(DATA_BYTES),
   });
-  assertEquals([...bytes.subarray(0, 6)], [0x42, 0xab, 0xcd, 0, 0, 0]);
+  assertEquals([...bytes.subarray(0, 6)], [0x52, 0xab, 0xcd, 0, 0, 0]);
   assertEquals(decodePacket(bytes)?.type, PacketType.Done);
 });
 

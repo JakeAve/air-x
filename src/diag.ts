@@ -398,7 +398,7 @@ sendButton.addEventListener("click", async () => {
     try {
       await sound.listen();
     } catch (err) {
-      log(`send: microphone unavailable, DONE will not be heard (${err})`);
+      log(`send: microphone unavailable, cannot confirm delivery (${err})`);
     }
     sound.protocol = protocol();
     qr.ecc = eccSelect.value as QrEcc;
@@ -419,7 +419,7 @@ sendButton.addEventListener("click", async () => {
       show("send-count", `0 of ${n} packets`);
     } else {
       show("send-count", "–");
-      cameraLine.textContent = "heard – · 0.0 KB/s";
+      cameraLine.textContent = "Heard – · 0.0 KB/s";
     }
     sendButton.textContent = "Stop";
     sendButton.classList.remove("primary");
@@ -438,7 +438,9 @@ sendButton.addEventListener("click", async () => {
     log(
       `send: ${items.length} item(s), ${bundle.length} bytes` +
         (by === "camera"
-          ? `, camera ${encoder.name} ${cameraRate.packetsPerCode}/code @ ${cameraRate.fps} fps ${qr.ecc}${
+          ? `, camera ${
+            encoder.name === "qr" ? "QR code" : encoder.name
+          } ${cameraRate.packetsPerCode}/code @ ${cameraRate.fps} fps ${qr.ecc}${
             adaptRateToggle.checked ? ", adaptive" : ""
           }`
           : `, sound ${sound.protocol} listenEvery ${listenEvery} window ${windowMs} ms`),
@@ -448,7 +450,7 @@ sendButton.addEventListener("click", async () => {
     let pass = 0;
     let rateNow: CameraRate = cameraRate;
     const line = (share: number | undefined, freshBytes: number) =>
-      `heard ${percent(share)} · ${
+      `Heard ${percent(share)} · ${
         (freshBytes / 1024 /
           Math.max(0.001, (performance.now() - start) / 1000))
           .toFixed(1)
@@ -517,7 +519,7 @@ sendButton.addEventListener("click", async () => {
     const elapsed = seconds(performance.now() - start);
     log(
       result === "done"
-        ? `send: DONE heard after ${elapsed}`
+        ? `send: done heard after ${elapsed}`
         : `send: stopped after ${elapsed}`,
     );
     if (result === "done") {
@@ -525,7 +527,7 @@ sendButton.addEventListener("click", async () => {
       stopTicker = undefined;
       $("send-grid").hidden = true;
       if (by === "camera") show("send-count", lastLine);
-      show("send-time", `${elapsed} · DONE heard`);
+      show("send-time", `${elapsed} · Delivered`);
     }
   } catch (err) {
     log(`send failed: ${err}`);
@@ -764,7 +766,9 @@ listenButton.addEventListener("click", async () => {
     let soundStats = { heard: 0, rejected: 0 };
     const counts = () => {
       const heard = Object.keys(codecs).map((name) =>
-        `${name} ${decoders.find((d) => d.name === name)?.stats?.heard ?? 0}`
+        `${name === "qr" ? "QR code" : name} ${
+          decoders.find((d) => d.name === name)?.stats?.heard ?? 0
+        }`
       );
       const rejected = decoders.reduce(
         (sum, d) => sum + (d.stats?.rejected ?? 0),
@@ -835,9 +839,12 @@ listenButton.addEventListener("click", async () => {
       onDone: (transferId) => {
         stopTicker?.();
         stopTicker = undefined;
-        show("rx-time", `${seconds(performance.now() - start)} · DONE sent`);
+        show(
+          "rx-time",
+          `${seconds(performance.now() - start)} · Confirmation sent`,
+        );
         log(
-          `receive: DONE sent for ${transferId} after ${
+          `receive: done sent for ${transferId} after ${
             seconds(performance.now() - start)
           }`,
         );

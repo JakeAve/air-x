@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark" />
     <title>Air X</title>
     <meta name="description"
-      content="Pass text and files to the device next to you by sound or QR code. No server, no account, no network." />
+      content="Transfer data between devices without a network connection" />
     <meta name="theme-color" content="#000000" />
     <link rel="canonical" href="https://jakeave.github.io/air-x/" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
@@ -16,7 +16,7 @@
     <meta property="og:site_name" content="Air X" />
     <meta property="og:title" content="Air X" />
     <meta property="og:description"
-      content="Pass text and files to the device next to you by sound or QR code. No server, no account, no network." />
+      content="Transfer data between devices without a network connection" />
     <meta property="og:url" content="https://jakeave.github.io/air-x/" />
     <meta property="og:image"
       content="https://jakeave.github.io/air-x/og.png" />
@@ -32,8 +32,8 @@
       <section id="screen-home" class="screen">
         <header class="strip"><span class="app">Air X</span></header>
         <h1>air x</h1>
-        <p class="lede">Pass text and files to the device next to you by sound
-          or QR code. No server, no account.</p>
+        <p
+          class="lede">Transfer data between devices without a network connection. Use sound or a QR code.</p>
         <nav class="tiles">
           <a class="tile" href="#send">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -71,9 +71,9 @@
           <p id="send-estimate" class="muted">Nothing to send yet</p>
           <hr />
           <details class="advanced">
-            <summary>advanced</summary>
+            <summary>Advanced</summary>
             <div class="stack">
-              <h2>camera</h2>
+              <h2>Camera</h2>
               <label>Codec
                 <select id="camera-codec">
                   <option value="qr" selected>QR code</option>
@@ -90,10 +90,10 @@
                 </div>
                 <label>Error correction
                   <select id="ecc">
-                    <option value="low">low</option>
-                    <option value="medium" selected>medium</option>
-                    <option value="quartile">quartile</option>
-                    <option value="high">high</option>
+                    <option value="low">Low</option>
+                    <option value="medium" selected>Medium</option>
+                    <option value="quartile">Quartile</option>
+                    <option value="high">High</option>
                   </select>
                 </label>
                 <label class="switch">Adapt rate to acks
@@ -101,18 +101,18 @@
                   <span class="state"></span>
                 </label>
               </div>
-              <h2>sound</h2>
+              <h2>Sound</h2>
               <label>Protocol
                 <select id="protocol">
-                  <option value="fastest">fastest</option>
-                  <option value="fast">fast</option>
-                  <option value="normal">normal</option>
-                  <option value="ultrasound-fastest">ultrasound fastest</option>
-                  <option value="ultrasound-fast">ultrasound fast</option>
-                  <option value="ultrasound-normal">ultrasound normal</option>
-                  <option value="quiet-audible">quiet audible (GMSK)</option>
-                  <option value="quiet-audible-7k">quiet audible 7k (OFDM)</option>
-                  <option value="quiet-ultrasound-3600">quiet ultrasound 3600 (OFDM)</option>
+                  <option value="fastest">Fastest</option>
+                  <option value="fast">Fast</option>
+                  <option value="normal">Normal</option>
+                  <option value="ultrasound-fastest">Ultrasound fastest</option>
+                  <option value="ultrasound-fast">Ultrasound fast</option>
+                  <option value="ultrasound-normal">Ultrasound normal</option>
+                  <option value="quiet-audible">Quiet audible (GMSK)</option>
+                  <option value="quiet-audible-7k">Quiet audible 7k (OFDM)</option>
+                  <option value="quiet-ultrasound-3600">Quiet ultrasound 3600 (OFDM)</option>
                 </select>
               </label>
               <div class="row">
@@ -147,7 +147,7 @@
           </label>
           <hr />
           <details class="advanced">
-            <summary>advanced</summary>
+            <summary>Advanced</summary>
             <div class="row">
               <label>Scan max edge
                 <input id="scan-max-edge" type="number" inputmode="numeric" min="320" step="160" value="1280" />
@@ -178,7 +178,7 @@
       </section>
 
       <details class="log">
-        <summary>log</summary>
+        <summary>Log</summary>
         <pre id="log"></pre>
       </details>
     </main>

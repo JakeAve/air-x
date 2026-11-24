@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
-import { dataBytes, DENSE_MAX_K, SOUND_PACKET_BYTES } from "../protocol.ts";
+import { dataBytes, SOUND_PACKET_BYTES } from "../protocol.ts";
 import { Decoder } from "./decoder.ts";
 import { Encoder } from "./encoder.ts";
 
@@ -15,19 +15,14 @@ const cases = [
     meanBound: 1.15 * k + 3,
     worst: 2 * k + 10,
   })),
-  { k: 500, trials: 10, meanBound: 1.3 * 500, worst: 10 * 500 },
+  { k: 500, trials: 10, meanBound: 500 + 4, worst: 500 + 20 },
 ];
 
 for (const { k, trials, meanBound, worst } of cases) {
   for (const loss of [0, 0.1, 0.2]) {
     for (const join of [0, 3 * k]) {
       const name = `k=${k}, ${loss * 100}% loss, joining at symbol ${join}`;
-      Deno.test({
-        name: `${name}: packets to decode stay within the bound`,
-        // Soliton repair symbols mostly miss the few blocks a lossy systematic
-        // pass leaves: k=500 measures a mean of 725 (10%) and 683 (20%).
-        ignore: k > DENSE_MAX_K && join === 0 && loss > 0,
-      }, () => {
+      Deno.test(`${name}: packets to decode stay within the bound`, () => {
         const random = seededRandom(k * 1000 + loss * 100 + join);
         let total = 0;
         for (let trial = 0; trial < trials; trial++) {

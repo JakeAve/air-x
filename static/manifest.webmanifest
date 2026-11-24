@@ -1,7 +1,7 @@
 {
   "name": "Air X",
   "short_name": "Air X",
-  "description": "Pass text and files to the device next to you by sound or QR code. No server, no account, no network.",
+  "description": "Transfer data between devices without a network connection",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

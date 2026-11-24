@@ -5,6 +5,15 @@ import {
 } from "@/adapters/pageLink.ts";
 import type { QrTransport } from "@/adapters/qrTransport.ts";
 import type { SoundTransport } from "@/adapters/soundTransport.ts";
+import { copyBlob, openType } from "@/adapters/clipboard.ts";
+import {
+  leaveLibrary,
+  renderHomeTile,
+  renderItemScreen,
+  renderLibrary,
+  seconds,
+  size,
+} from "@/libraryView.ts";
 import { encodeBundle, type Item } from "@/lib/bundle.ts";
 import { OVERHEAD } from "@/lib/cameraCodec.ts";
 import { blockCount } from "@/lib/fountain/symbols.ts";
@@ -69,10 +78,6 @@ function show(id: string, value: string | number) {
   $(id).textContent = String(value);
 }
 
-function seconds(ms: number): string {
-  return `${(ms / 1000).toFixed(1)} s`;
-}
-
 function about(s: number): string {
   if (s < 1) return "under 1 s";
   if (s < 90) return `about ${Math.round(s)} s`;
@@ -82,10 +87,6 @@ function about(s: number): string {
 
 function percent(share: number | undefined): string {
   return share === undefined ? "–" : `${Math.round(share * 100)}%`;
-}
-
-function size(bytes: number): string {
-  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
 }
 
 function positive(input: HTMLInputElement, fallback: number): number {
@@ -154,15 +155,30 @@ function gridPaint(id: string, states: Uint8Array) {
 }
 
 // Screens: the hash picks one; leaving a screen stops whatever it was doing.
-const SCREENS = ["home", "send", "receive"];
+// `#library/<hash>` is the item screen; `#item` alone is not a screen.
+const SCREENS = ["home", "send", "receive", "library", "item"];
 let running: AbortController | undefined;
 
 function showScreen() {
   const name = location.hash.slice(1);
-  const screen = SCREENS.includes(name) ? name : "home";
+  const hash = name.startsWith("library/") ? name.slice(8) : "";
+  const screen = hash
+    ? "item"
+    : SCREENS.includes(name) && name !== "item"
+    ? name
+    : "home";
   running?.abort();
+  leaveLibrary();
   main.dataset.screen = screen;
   for (const id of SCREENS) $(`screen-${id}`).hidden = id !== screen;
+  const render = screen === "home"
+    ? renderHomeTile()
+    : screen === "library"
+    ? renderLibrary()
+    : screen === "item"
+    ? renderItemScreen(hash)
+    : undefined;
+  render?.catch((err) => log(`library failed: ${err}`));
 }
 addEventListener("hashchange", showScreen);
 showScreen();
@@ -576,7 +592,7 @@ function renderItem(item: Item) {
   setIcon(link, "Download");
   const isText = item.type.startsWith("text/");
   if (isText || item.type.startsWith("image/")) {
-    meta.append(copyLink(blob, isText));
+    meta.append(copyLink(blob));
   }
   const viewType = openType(item.type);
   if (viewType) meta.append(openLink(item.bytes, viewType));
@@ -600,15 +616,6 @@ function renderItem(item: Item) {
   receivedItems.append(li);
 }
 
-// A blob URL opens with this page's origin, so the sender's markup or SVG opens
-// as plain text, never as a page that could run script here.
-function openType(type: string) {
-  if (/^(image\/(?!svg)|video\/|audio\/)|^application\/pdf$/.test(type)) {
-    return type;
-  }
-  if (/^text\/|svg|xml|json/.test(type)) return "text/plain;charset=utf-8";
-}
-
 function openLink(bytes: Uint8Array, type: string) {
   const url = URL.createObjectURL(
     new Blob([bytes as Uint8Array<ArrayBuffer>], { type }),
@@ -622,8 +629,7 @@ function openLink(bytes: Uint8Array, type: string) {
   return open;
 }
 
-// The clipboard takes text, and images only as PNG, so other images are redrawn as PNG.
-function copyLink(blob: Blob, isText: boolean) {
+function copyLink(blob: Blob) {
   const copy = document.createElement("a");
   copy.href = "#";
   copy.role = "button";
@@ -631,12 +637,7 @@ function copyLink(blob: Blob, isText: boolean) {
   copy.addEventListener("click", async (event) => {
     event.preventDefault();
     try {
-      // iOS only allows the write inside the tap, so the PNG goes in as a promise.
-      await navigator.clipboard.write([
-        new ClipboardItem(
-          isText ? { "text/plain": blob.text() } : { "image/png": png(blob) },
-        ),
-      ]);
+      await copyBlob(blob);
       setIcon(copy, "Copied");
     } catch (err) {
       log(`copy failed: ${err}`);
@@ -663,14 +664,6 @@ function setIcon(link: HTMLAnchorElement, label: keyof typeof ICONS) {
   link.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${
     ICONS[label]
   }"/></svg>`;
-}
-
-async function png(blob: Blob) {
-  if (blob.type === "image/png") return blob;
-  const bitmap = await createImageBitmap(blob);
-  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-  canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
-  return canvas.convertToBlob();
 }
 
 let scanningQr = false;

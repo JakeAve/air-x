@@ -98,7 +98,18 @@ inside a `.stack` sit 1rem apart; label to control is 0.5rem; two-up `.row` and
   closed by default. `.log` is muted and hidden on the home screen.
 - **Tiles** (`.tile`): square via `aspect-ratio`, gradient fill, black stroke
   icon 2.5rem top-left, 1.25rem label bottom-left. Icons are inline SVG, stroke
-  1.5 on a 24 grid, square caps. Never emoji or glyph fonts.
+  1.5 on a 24 grid, square caps. Never emoji or glyph fonts. `.tile.wide`
+  (home's `library`) spans both columns at `aspect-ratio: 2 / 1`; its `.foot`
+  puts the label left and the newest item's title right in 0.875rem at 75%.
+- **Action bar** (`.actions`, the item screen): equal cells on `--surface`, icon
+  (1.5rem, solid `--accent`; Delete's `--ink`) over a 0.875rem label.
+  Unsupported actions are hidden and the rest share the row. It is the item
+  screen's action, the one exception to one button per screen.
+- **Library rows** (`.entry`): a 3.5rem `.thumb` on `--surface` (first words in
+  0.5625rem, a cover-cropped image, initials, or a file icon), name 1.125rem on
+  one line with ellipsis, a muted 0.875rem line with the send or receive arrow.
+  Rows and other links that are not accent text take `.bare`, which skips the
+  gradient-text rule.
 - **Progress**: a `.grid` of square `<i>` tiles, one per block when receiving or
   per expected packet when sending (at most 512; past that each stands for a
   run). JS gives the grid a box to spread over and sets `--cols` from it: one
@@ -148,4 +159,4 @@ button never shares an id with its section.
 Rounded corners, gradients other than `--accent-grad`, shadows, blur, emoji,
 icon fonts, external CSS or font hosts, px values in CSS (rem only; the root is
 the single px), a second accent, counters that duplicate the log, and any button
-that is not the screen's one action or a camera flip.
+that is not the screen's one action, a camera flip, or the item action bar.

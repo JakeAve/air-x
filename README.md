@@ -80,7 +80,7 @@ Then open the printed address on two devices. Tap Send on one, type text or pick
 files, and press Send; tap Receive on the other and press Receive. Send by picks
 QR or sound (it defaults to sound for bundles up to 2 KB, else QR) and the line
 under it estimates how long each would take. Tuning inputs live under Advanced
-on each screen, and Start over in the top strip returns to the first screen.
+on each screen, and ‹ Air X at the top left returns to the first screen.
 
 ### Reading a phone's log
 

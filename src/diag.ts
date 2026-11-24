@@ -18,6 +18,8 @@ const SILENCE_MS = 12_000;
 /** How often a receive logs what its camera scan has seen. */
 const SCAN_REPORT_MS = 5_000;
 const SOUND_DEFAULT_MAX_BYTES = 2048;
+/** Grid cells for a transfer whose codec reports a share, not blocks. */
+const SHARE_CELLS = 64;
 
 function $<T extends HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
@@ -726,8 +728,6 @@ listenButton.addEventListener("click", async () => {
   listenButton.textContent = "Stop";
   listenButton.classList.remove("primary");
   gridReset("rx-grid", 0, 1, 1);
-  const shares = new Map<number, HTMLProgressElement>();
-  $("rx-shares").replaceChildren();
   show("rx-count", "waiting for a transfer");
   let scanReport: ReturnType<typeof setInterval> | undefined;
   let decoders: ReturnType<Devices["codecs"][CodecName]["decoder"]>[] = [];
@@ -791,42 +791,40 @@ listenButton.addEventListener("click", async () => {
       signal: controller.signal,
       onProgress: ({ sound: heard, transfers }) => {
         soundStats = heard;
-        for (const { transferId, progress, via } of transfers) {
-          let bar = shares.get(transferId);
-          if (!bar) {
-            bar = document.createElement("progress");
-            bar.max = 1;
-            bar.title = `Transfer ${transferId} by ${via}`;
-            shares.set(transferId, bar);
-            $("rx-shares").append(bar);
-          }
-          bar.value = progress;
-        }
         const t = transfers.reduce(
           (best, t) => t.progress > best.progress ? t : best,
           transfers[0],
         );
-        if (t?.k !== undefined && t.states) {
-          if (t.transferId !== shown) {
-            shown = t.transferId;
-            gridReset(
-              "rx-grid",
-              t.k,
-              $("rx-grid").clientWidth,
-              innerHeight / 2,
-            );
-          }
-          gridPaint("rx-grid", t.states());
-          show("rx-count", `${Math.round(t.progress * t.k)} of ${t.k} blocks`);
-        } else if (t) {
-          show("rx-count", `${percent(t.progress)} heard`);
+        if (!t) return;
+        // A codec without blocks fills SHARE_CELLS in order by its share.
+        const blocks = t.k !== undefined && t.states !== undefined;
+        const cells = blocks ? t.k! : SHARE_CELLS;
+        if (t.transferId !== shown) {
+          shown = t.transferId;
+          gridReset(
+            "rx-grid",
+            cells,
+            $("rx-grid").clientWidth,
+            innerHeight / 2,
+          );
         }
+        gridPaint(
+          "rx-grid",
+          blocks ? t.states!() : Uint8Array.from(
+            { length: cells },
+            (_, i) => i < Math.round(t.progress * cells) ? 2 : 0,
+          ),
+        );
+        show(
+          "rx-count",
+          blocks
+            ? `${Math.round(t.progress * cells)} of ${cells} blocks`
+            : `${percent(t.progress)} heard`,
+        );
       },
       onComplete: ({ transferId, items }) => {
         received = true;
         $("rx-grid").hidden = true;
-        const bar = shares.get(transferId);
-        if (bar) bar.value = 1;
         log(
           `receive: transfer ${transferId} complete after ${
             seconds(performance.now() - start)

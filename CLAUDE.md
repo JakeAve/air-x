@@ -23,7 +23,7 @@ games. Deno 2 + TypeScript, plain HTML and CSS.
 ```bash
 deno task dev     # build to dist/, serve on PORT (default 8444), rebuild on change
 deno task build   # build to dist/
-deno task e2e     # build, then headless-Chromium receive test: sound-only via fake mic (ggwave, then quiet), then QR-only via fake camera (needs Playwright's Chromium: `deno run -A npm:playwright install chromium`)
+deno task e2e     # build, then headless-Chromium receive test: sound-only via fake mic (ggwave, then quiet; the first also checks the item is saved to the library and survives a reload), then QR-only via fake camera (needs Playwright's Chromium: `deno run -A npm:playwright install chromium`)
 ```
 
 `dev` serves HTTPS with a certificate it makes with mkcert for the machine's

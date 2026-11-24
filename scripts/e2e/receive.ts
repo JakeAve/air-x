@@ -5,7 +5,7 @@
 // Set CHROMIUM_PATH to use a Chromium outside Playwright's own cache.
 import { serveDir } from "@std/http";
 import { join } from "@std/path";
-import { chromium } from "playwright";
+import { chromium, type Page } from "playwright";
 import { FIXTURE_FILE_NAME, FIXTURE_TEXT, writeFixtures } from "./fixtures.ts";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -22,6 +22,37 @@ const server = Deno.serve(
 const PORT = server.addr.port;
 
 const failures: string[] = [];
+
+// The received item must be saved, listed under #library, and survive a reload.
+async function checkLibrary(page: Page, expected: string): Promise<void> {
+  const listed = (text: string) =>
+    page.waitForFunction(
+      (text) =>
+        document.querySelector("#library-list")?.textContent?.includes(text) ??
+          false,
+      text,
+      { timeout: 10_000 },
+    );
+  try {
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#saved")?.textContent?.includes(
+          "Saved to library",
+        ) ?? false,
+      undefined,
+      { timeout: 10_000 },
+    );
+    await page.goto(`http://localhost:${PORT}/diag.html#library`);
+    await listed(expected);
+    await page.reload();
+    await listed(expected);
+    console.log("library: saved, listed, survives reload");
+  } catch (err) {
+    failures.push(
+      `library: item not saved or not listed after reload (${err})`,
+    );
+  }
+}
 
 async function receive(
   label: string,
@@ -65,6 +96,7 @@ async function receive(
       );
       const elapsed = ((performance.now() - start) / 1000).toFixed(1);
       console.log(`${label} receive: ${elapsed} s`);
+      if (label === "sound") await checkLibrary(page, expected);
     } catch (err) {
       failures.push(`${label}: item not heard within 60 s (${err})`);
     }

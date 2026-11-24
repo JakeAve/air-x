@@ -646,6 +646,9 @@ main[data-screen="home"] .log {
   width: 2.75rem;
   height: 2.75rem;
   margin-block: -0.625rem;
+  /* Safari clips background-clip:text to glyphs only, so a gradient link's SVG would vanish. */
+  background: none;
+  color: var(--accent);
 }
 
 .items .meta a:last-child {

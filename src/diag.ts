@@ -5,6 +5,17 @@ import {
 } from "@/adapters/pageLink.ts";
 import type { QrTransport } from "@/adapters/qrTransport.ts";
 import type { SoundTransport } from "@/adapters/soundTransport.ts";
+import { copyBlob, openType } from "@/adapters/clipboard.ts";
+import { record } from "@/adapters/library.ts";
+import type { LibraryEvent } from "@/lib/library.ts";
+import {
+  leaveLibrary,
+  renderHomeTile,
+  renderItemScreen,
+  renderLibrary,
+  seconds,
+  size,
+} from "@/libraryView.ts";
 import { encodeBundle, type Item } from "@/lib/bundle.ts";
 import { OVERHEAD } from "@/lib/cameraCodec.ts";
 import { blockCount } from "@/lib/fountain/symbols.ts";
@@ -59,18 +70,27 @@ const ackEveryInput = $<HTMLInputElement>("ack-every");
 const listenButton = $<HTMLButtonElement>("listen");
 const receivedItems = $<HTMLUListElement>("received-items");
 const logEl = $<HTMLPreElement>("log");
+const savedLine = $<HTMLParagraphElement>("saved");
 
 function log(line: string) {
   const time = new Date().toISOString().slice(11, 23);
   logEl.textContent += `${time} ${line}\n`;
 }
 
-function show(id: string, value: string | number) {
-  $(id).textContent = String(value);
+/** Saves to the library; never throws, so a failed save only logs. */
+async function save(items: Item[], event: LibraryEvent): Promise<boolean> {
+  try {
+    await record(items, event);
+    log(`library: saved ${items.length} item(s)`);
+    return true;
+  } catch (err) {
+    log(`library: save failed: ${err}`);
+    return false;
+  }
 }
 
-function seconds(ms: number): string {
-  return `${(ms / 1000).toFixed(1)} s`;
+function show(id: string, value: string | number) {
+  $(id).textContent = String(value);
 }
 
 function about(s: number): string {
@@ -82,10 +102,6 @@ function about(s: number): string {
 
 function percent(share: number | undefined): string {
   return share === undefined ? "–" : `${Math.round(share * 100)}%`;
-}
-
-function size(bytes: number): string {
-  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
 }
 
 function positive(input: HTMLInputElement, fallback: number): number {
@@ -154,15 +170,30 @@ function gridPaint(id: string, states: Uint8Array) {
 }
 
 // Screens: the hash picks one; leaving a screen stops whatever it was doing.
-const SCREENS = ["home", "send", "receive"];
+// `#library/<hash>` is the item screen; `#item` alone is not a screen.
+const SCREENS = ["home", "send", "receive", "library", "item"];
 let running: AbortController | undefined;
 
 function showScreen() {
   const name = location.hash.slice(1);
-  const screen = SCREENS.includes(name) ? name : "home";
+  const hash = name.startsWith("library/") ? name.slice(8) : "";
+  const screen = hash
+    ? "item"
+    : SCREENS.includes(name) && name !== "item"
+    ? name
+    : "home";
   running?.abort();
+  leaveLibrary();
   main.dataset.screen = screen;
   for (const id of SCREENS) $(`screen-${id}`).hidden = id !== screen;
+  const render = screen === "home"
+    ? renderHomeTile()
+    : screen === "library"
+    ? renderLibrary()
+    : screen === "item"
+    ? renderItemScreen(hash)
+    : undefined;
+  render?.catch((err) => log(`library failed: ${err}`));
 }
 addEventListener("hashchange", showScreen);
 showScreen();
@@ -456,6 +487,18 @@ sendButton.addEventListener("click", async () => {
           .toFixed(1)
       } KB/s`;
     let lastLine = "";
+    // Recorded once, when every source block has gone out at least once.
+    let recorded = false;
+    const recordSent = () => {
+      if (recorded) return;
+      recorded = true;
+      save(items, {
+        direction: "sent",
+        at: Date.now(),
+        via: by === "camera" ? "qr" : "sound",
+        ms: performance.now() - start,
+      });
+    };
     result = await sendBundle(bundle, {
       listen: sound,
       sound: by === "sound"
@@ -486,6 +529,7 @@ sendButton.addEventListener("click", async () => {
             `send: transfer ${transferId}${k === undefined ? "" : `, k ${k}`}`,
           );
         }
+        if (freshBytes >= bundle.length) recordSent();
         if (via === "camera") {
           if (
             rate &&
@@ -523,6 +567,7 @@ sendButton.addEventListener("click", async () => {
         : `send: stopped after ${elapsed}`,
     );
     if (result === "done") {
+      recordSent();
       stopTicker();
       stopTicker = undefined;
       $("send-grid").hidden = true;
@@ -576,7 +621,7 @@ function renderItem(item: Item) {
   setIcon(link, "Download");
   const isText = item.type.startsWith("text/");
   if (isText || item.type.startsWith("image/")) {
-    meta.append(copyLink(blob, isText));
+    meta.append(copyLink(blob));
   }
   const viewType = openType(item.type);
   if (viewType) meta.append(openLink(item.bytes, viewType));
@@ -600,15 +645,6 @@ function renderItem(item: Item) {
   receivedItems.append(li);
 }
 
-// A blob URL opens with this page's origin, so the sender's markup or SVG opens
-// as plain text, never as a page that could run script here.
-function openType(type: string) {
-  if (/^(image\/(?!svg)|video\/|audio\/)|^application\/pdf$/.test(type)) {
-    return type;
-  }
-  if (/^text\/|svg|xml|json/.test(type)) return "text/plain;charset=utf-8";
-}
-
 function openLink(bytes: Uint8Array, type: string) {
   const url = URL.createObjectURL(
     new Blob([bytes as Uint8Array<ArrayBuffer>], { type }),
@@ -622,8 +658,7 @@ function openLink(bytes: Uint8Array, type: string) {
   return open;
 }
 
-// The clipboard takes text, and images only as PNG, so other images are redrawn as PNG.
-function copyLink(blob: Blob, isText: boolean) {
+function copyLink(blob: Blob) {
   const copy = document.createElement("a");
   copy.href = "#";
   copy.role = "button";
@@ -631,12 +666,7 @@ function copyLink(blob: Blob, isText: boolean) {
   copy.addEventListener("click", async (event) => {
     event.preventDefault();
     try {
-      // iOS only allows the write inside the tap, so the PNG goes in as a promise.
-      await navigator.clipboard.write([
-        new ClipboardItem(
-          isText ? { "text/plain": blob.text() } : { "image/png": png(blob) },
-        ),
-      ]);
+      await copyBlob(blob);
       setIcon(copy, "Copied");
     } catch (err) {
       log(`copy failed: ${err}`);
@@ -663,14 +693,6 @@ function setIcon(link: HTMLAnchorElement, label: keyof typeof ICONS) {
   link.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${
     ICONS[label]
   }"/></svg>`;
-}
-
-async function png(blob: Blob) {
-  if (blob.type === "image/png") return blob;
-  const bitmap = await createImageBitmap(blob);
-  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-  canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
-  return canvas.convertToBlob();
 }
 
 let scanningQr = false;
@@ -730,6 +752,7 @@ listenButton.addEventListener("click", async () => {
   listenButton.textContent = "Stop";
   listenButton.classList.remove("primary");
   gridReset("rx-grid", 0, 1, 1);
+  savedLine.hidden = true;
   show("rx-count", "waiting for a transfer");
   let scanReport: ReturnType<typeof setInterval> | undefined;
   let decoders: ReturnType<Devices["codecs"][CodecName]["decoder"]>[] = [];
@@ -761,6 +784,8 @@ listenButton.addEventListener("click", async () => {
       }`,
     );
     let shown: number | undefined;
+    // When each transfer was first seen, so idle waiting is not transfer time.
+    const firstSeen = new Map<number, number>();
     // ponytail: every codec decodes the one camera; fan-out comes with a second codec.
     decoders = scanningQr ? Object.values(codecs).map((c) => c.decoder()) : [];
     let soundStats = { heard: 0, rejected: 0 };
@@ -795,6 +820,11 @@ listenButton.addEventListener("click", async () => {
       signal: controller.signal,
       onProgress: ({ sound: heard, transfers }) => {
         soundStats = heard;
+        for (const { transferId } of transfers) {
+          if (!firstSeen.has(transferId)) {
+            firstSeen.set(transferId, performance.now());
+          }
+        }
         const t = transfers.reduce(
           (best, t) => t.progress > best.progress ? t : best,
           transfers[0],
@@ -826,7 +856,7 @@ listenButton.addEventListener("click", async () => {
             : `${percent(t.progress)} heard`,
         );
       },
-      onComplete: ({ transferId, items }) => {
+      onComplete: ({ transferId, items, via }) => {
         received = true;
         $("rx-grid").hidden = true;
         // The bundle is whole, so no code is needed; DONE goes on by sound.
@@ -839,6 +869,18 @@ listenButton.addEventListener("click", async () => {
           }, ${items.length} item(s), ${counts()}`,
         );
         items.forEach(renderItem);
+        save(items, {
+          direction: "received",
+          at: Date.now(),
+          via: via === "sound" ? "sound" : "qr",
+          // A one-packet transfer can complete before any progress.
+          ms: performance.now() - (firstSeen.get(transferId) ?? start),
+        }).then((ok) => {
+          savedLine.textContent = ok
+            ? "Saved to library"
+            : "Couldn't save to library";
+          savedLine.hidden = false;
+        });
       },
       onDone: (transferId) => {
         stopTicker?.();

@@ -23,7 +23,7 @@ games. Deno 2 + TypeScript, plain HTML and CSS.
 ```bash
 deno task dev     # build to dist/, serve on PORT (default 8444), rebuild on change
 deno task build   # build to dist/
-deno task e2e     # build, then headless-Chromium receive test: sound-only via fake mic (ggwave, then quiet), then QR-only via fake camera (needs Playwright's Chromium: `deno run -A npm:playwright install chromium`)
+deno task e2e     # build, then headless-Chromium receive test: sound-only via fake mic (ggwave, then quiet; the first also checks the item is saved to the library and survives a reload), then QR-only via fake camera (needs Playwright's Chromium: `deno run -A npm:playwright install chromium`)
 ```
 
 `dev` serves HTTPS with a certificate it makes with mkcert for the machine's
@@ -70,16 +70,17 @@ fresh port is a clean origin. README, "Testing on phones", has the rest.
   (`--accent-grad`); `scripts/grad-editor.local.js`, gitignored, is a panel for
   tuning it that `dev` inlines when present. Visual rules live in
   `.claude/skills/air-x-style/SKILL.md`; read it before touching markup or CSS.
-- `src/diag.ts` — the page: three screens picked by the hash (`#home`, `#send`,
-  `#receive`; leaving a screen aborts its transfer). Send text and files by
-  sound or camera (the Send by radio defaults to sound for bundles up to 2048
-  bytes, else camera, until picked by hand) with a live time estimate of both;
-  receive from camera and mic at once, with a share bar per transfer; log,
-  including acks on both ends. One button per screen flips between Send/Listen
-  and Stop. A camera send shows the code full-window with its own Stop button.
-  Tuning inputs sit under Advanced, including a camera codec select (QR only).
-  Defaults: 4 packets per code, 5 fps, ECC medium, adapt rate on; camera on,
-  scan max edge 1280, ack every 80 symbols (0 never acks); silence 12 s.
+- `src/diag.ts` — the page: screens picked by the hash (`#home`, `#send`,
+  `#receive`, `#library`, `#library/<hash>`; leaving a screen aborts its
+  transfer). Send text and files by sound or camera (the Send by radio defaults
+  to sound for bundles up to 2048 bytes, else camera, until picked by hand) with
+  a live time estimate of both; receive from camera and mic at once, with a
+  share bar per transfer; log, including acks on both ends. One button per
+  screen flips between Send/Listen and Stop. A camera send shows the code
+  full-window with its own Stop button. Tuning inputs sit under Advanced,
+  including a camera codec select (QR only). Defaults: 4 packets per code, 5
+  fps, ECC medium, adapt rate on; camera on, scan max edge 1280, ack every 80
+  symbols (0 never acks); silence 12 s.
 - `src/adapters/` — the only browser-API code besides the entries: `pageLink.ts`
   (`openDevices`: one codec worker shared by both transports; `cameraCodecs`:
   the registry of camera codecs by name, each an `encoder` and a `decoder()`
@@ -87,7 +88,15 @@ fresh port is a clean origin. README, "Testing on phones", has the rest.
   `soundTransport.ts` (`SoundTransport`, a `PacketChannel`), `qrTransport.ts`
   (`QrTransport`, a `PacketSource` and `PacketDisplay`), `camera.ts`,
   `screen.ts` (draws a code on a canvas), `codecWorker.ts`, `microphone.ts`,
-  `speaker.ts`.
+  `speaker.ts`, `library.ts` (IndexedDB library: `record`, `listItems`,
+  `getItem`, `removeItem`, `putItem`; dedupes and evicts on save),
+  `clipboard.ts` (`copyBlob`: text as text, images redrawn as PNG; `openType`:
+  markup and SVG open as plain text).
+- `src/libraryView.ts` — the library screens, imported by `diag.ts`: the home
+  tile's newest title, `#library` (rows by day, Undo after a delete, count and
+  disclosure), and `#library/<hash>` (preview, events, Copy/Share/Save/Delete).
+  `leaveLibrary` revokes its object URLs on every screen change. Also `size` and
+  `seconds`, shared with `diag.ts`.
 - `src/codecWorker.ts` — worker hosting ggwave and libquiet, so the page bundle
   carries neither. Page code imports `PACKET_SECONDS` from `protocol.ts`, not
   `ggwave.ts`.
@@ -138,6 +147,9 @@ The protocol layer. Spec: the main checkout's
   land at once and `raptor.ts`'s `Solver` runs once K symbols are in. Returns
   the zero-padded bundle.
 - `abort.ts` — `sleep` and `aborted` on an `AbortSignal`.
+- `library.ts` — pure logic for the on-device library: `hashBytes`, `merge`
+  (dedupe by hash, events oldest first), `evictions` under `LIBRARY_CAP`, and
+  `title`.
 - `channel.ts` — `PacketSource` (`onPacket`), `PacketChannel` (adds
   `send(packets, signal)`), `PacketDisplay` (`show`, `clear`).
 - `receiver.ts` — `Receiver`: one decoder per interleaved transfer, evicts stale

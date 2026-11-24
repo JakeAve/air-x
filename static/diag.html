@@ -46,6 +46,13 @@
             </svg>
             <span>receive</span>
           </a>
+          <a class="tile wide" href="#library">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 5h7l2 2 2-2h7v14h-7l-2 2-2-2H3zM12 7v14" />
+            </svg>
+            <span class="foot"><span>library</span><small id="home-latest"
+                hidden></small></span>
+          </a>
         </nav>
       </section>
 
@@ -180,8 +187,48 @@
             <span id="rx-time" class="muted">–</span>
           </div>
           <ul id="received-items" class="items"></ul>
+          <p id="saved" class="muted" hidden></p>
         </div>
         <button id="listen" class="primary">Receive</button>
+      </section>
+
+      <section id="screen-library" class="screen" hidden>
+        <header class="strip">
+          <a class="app"
+            href="#home"><svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M15 6l-6 6 6 6" />
+            </svg>Air X</a>
+        </header>
+        <h1>library</h1>
+        <p id="library-undo" class="muted undo" hidden>Deleted · <button
+            id="library-undo-button" class="text" type="button">Undo</button></p>
+        <div id="library-list" class="stack" hidden></div>
+        <p id="library-empty" class="muted"
+          hidden>Things you send and receive show up here.</p>
+        <p id="library-count" class="muted" hidden></p>
+        <p
+          class="muted">Kept in this browser only. Your browser can clear it at any time, so save anything you need to keep.</p>
+      </section>
+
+      <section id="screen-item" class="screen" hidden>
+        <header class="strip">
+          <a class="app"
+            href="#library"><svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M15 6l-6 6 6 6" />
+            </svg>Library</a>
+        </header>
+        <div id="item-preview" class="room"></div>
+        <div id="item-facts" class="stack"></div>
+        <nav class="actions">
+          <button id="item-copy" type="button"><svg viewBox="0 0 24 24"
+              aria-hidden="true"><path d="M8 8h12v12H8zM16 8V4H4v12h4" /></svg>Copy</button>
+          <button id="item-share" type="button"><svg viewBox="0 0 24 24"
+              aria-hidden="true"><path d="M12 15V4M7 9l5-5 5 5M5 13v7h14v-7" /></svg>Share</button>
+          <a id="item-save" class="bare"><svg viewBox="0 0 24 24"
+              aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>Save</a>
+          <button id="item-delete" type="button"><svg viewBox="0 0 24 24"
+              aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" /></svg>Delete</button>
+        </nav>
       </section>
 
       <details class="log">

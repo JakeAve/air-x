@@ -87,9 +87,10 @@ fresh port is a clean origin. README, "Testing on phones", has the rest.
   `soundTransport.ts` (`SoundTransport`, a `PacketChannel`), `qrTransport.ts`
   (`QrTransport`, a `PacketSource` and `PacketDisplay`), `camera.ts`,
   `screen.ts` (draws a code on a canvas), `codecWorker.ts`, `microphone.ts`,
-  `speaker.ts`.
-- `src/codecWorker.ts` — worker hosting ggwave and libquiet, so the page bundle
-  carries neither. Page code imports `PACKET_SECONDS` from `protocol.ts`, not
+  `screen.ts` (draws a code on a canvas), `codecWorker.ts`, `microphone.ts`,
+  `speaker.ts`, `library.ts` (IndexedDB library: `record`, `listItems`,
+  `getItem`, `removeItem`, `putItem`; dedupes and evicts on save). carries
+  neither. Page code imports `PACKET_SECONDS` from `protocol.ts`, not
   `ggwave.ts`.
 - `vendor/quiet/` — libquiet's 2016 emscripten asm.js build from quiet-js,
   wrapped as an ESM factory, plus its memory initializer inlined as `mem.ts`.

@@ -1,39 +1,46 @@
 import { anySignal, sleep } from "./abort.ts";
 import { BundleError, decodeBundle, type Item } from "./bundle.ts";
-import type { PacketChannel, PacketDisplay, PacketSource } from "./channel.ts";
-import { Encoder } from "./fountain/encoder.ts";
+import type { CameraEncoder, CameraSending } from "./cameraCodec.ts";
+import type { PacketChannel, PacketSource } from "./channel.ts";
 import {
   ackShare,
   decodeAck,
   decodePacket,
   encodeAck,
   encodePacket,
-  type Packet,
   PacketType,
   type Run,
 } from "./packet.ts";
+import { ACK_RUNS, dataBytes, SOUND_PACKET_BYTES } from "./protocol.ts";
+import type { CameraRate, RatePolicy, RateSample } from "./rate.ts";
+import { SymbolStream } from "./symbolStream.ts";
 import {
-  ACK_RUNS,
-  dataBytes,
-  QR_PACKET_BYTES,
-  SOUND_PACKET_BYTES,
-} from "./protocol.ts";
-import type { QrRate, RatePolicy, RateSample } from "./rate.ts";
-import { type Completed, Receiver, type TransferProgress } from "./receiver.ts";
+  packetDecoder,
+  type PacketStats,
+  type TransferDecoder,
+  type TransferHeard,
+  type TransferStatus,
+} from "./transferDecoder.ts";
 
 export interface SendProgress {
   transferId: number;
-  k: number;
+  /** The sound transfer's block count; a camera codec's units need not be blocks. */
+  k?: number;
   soundSent: number;
-  qrSent: number;
-  codes: number;
-  /** The batch that just went out. */
-  via: "sound" | "qr";
+  cameraFrames: number;
+  /** Fresh units the camera codec sent. */
+  cameraFresh: number;
+  /** Fresh bytes sent on the live path. */
+  freshBytes: number;
+  /** The batch or frame that just went out. */
+  via: "sound" | "camera";
   symbolIds: number[];
   /** Blocks queued for resend from acks so far. */
   acked: number;
-  /** The rate of a QR batch. */
-  rate?: QrRate;
+  /** The last ack's share heard. */
+  share?: number;
+  /** The rate of a camera frame. */
+  rate?: CameraRate;
 }
 
 export interface SoundSend {
@@ -42,15 +49,14 @@ export interface SoundSend {
   windowMs: number;
 }
 
-export interface QrSend {
-  display: PacketDisplay;
+export interface CameraSend {
+  encoder: CameraEncoder;
   /** With `adapt`, only where the rate starts. */
-  packetsPerCode: number;
-  fps: number;
+  rate: CameraRate;
   /**
    * Lets `policy` change the rate as the receiver's acks come in: one sample
    * per ack, from the share heard the receiver measured itself,
-   * and a silent one each time `silentAfter` fresh symbols go out with no ack,
+   * and a silent one each time `silentAfter` fresh units go out with no ack,
    * once some ack was heard (before that, no one may be looking yet).
    */
   adapt?: { policy: RatePolicy; silentAfter: number };
@@ -59,75 +65,66 @@ export interface QrSend {
 export interface SendOptions {
   /** Where DONE and acks are heard. */
   listen: PacketSource;
-  /** Exactly one of `sound` and `qr`. */
+  /** Exactly one of `sound` and `camera`. */
   sound?: SoundSend;
-  qr?: QrSend;
+  camera?: CameraSend;
   signal: AbortSignal;
   onProgress?: (p: SendProgress) => void;
+  /** Every ack of this transfer heard: its runs, and its share heard when known. */
+  onAck?: (runs: Run[], share?: number) => void;
 }
 
 export async function sendBundle(
   bundle: Uint8Array,
   options: SendOptions,
 ): Promise<"done" | "stopped"> {
-  const { listen, sound, qr, signal, onProgress } = options;
-  if (!sound && !qr) throw new RangeError("sendBundle needs sound or qr");
-  if (sound && qr) {
-    throw new RangeError("sendBundle takes sound or qr, not both");
+  const { listen, sound, camera, signal, onProgress, onAck } = options;
+  if (!sound && !camera) {
+    throw new RangeError("sendBundle needs sound or camera");
+  }
+  if (sound && camera) {
+    throw new RangeError("sendBundle takes sound or camera, not both");
   }
   const transferId = crypto.getRandomValues(new Uint16Array(1))[0];
-  const encoder = new Encoder(
-    bundle,
-    transferId,
-    qr ? QR_PACKET_BYTES : SOUND_PACKET_BYTES,
-  );
   const heardDone = new AbortController();
   const stop = anySignal(signal, heardDone.signal);
+  const stream = sound
+    ? new SymbolStream(bundle, transferId, SOUND_PACKET_BYTES)
+    : undefined;
   let soundSent = 0;
-  let qrSent = 0;
-  let codes = 0;
+  let cameraFrames = 0;
+  let cameraFresh = 0;
+  let freshBytes = 0;
   let acked = 0;
-  const wanted: number[] = [];
-  const queued = new Set<number>();
-  let rate: QrRate = {
-    packetsPerCode: qr?.packetsPerCode ?? 0,
-    fps: qr?.fps ?? 0,
-  };
-  /** Fresh symbols sent, which is also the next fresh symbol id. */
-  let fresh = 0;
+  let share: number | undefined;
+  let rate = camera?.rate;
+  let sending: CameraSending | undefined;
   /** Fresh count when the receiver was last heard from, or last given up on. */
   let quietSince = 0;
   /** Silence means nothing until a receiver has acked: it may not be looking yet. */
   let everAcked = false;
   const retune = (sample: Omit<RateSample, "rate">) => {
-    const next = qr!.adapt!.policy({ rate, ...sample });
-    quietSince = fresh;
-    rate = next;
+    rate = camera!.adapt!.policy({ rate: rate!, ...sample });
+    quietSince = sending!.fresh;
+    sending!.setRate(rate);
   };
-  const progress = (via: "sound" | "qr", symbolIds: number[]) =>
+  const progress = (
+    via: "sound" | "camera",
+    symbolIds: number[],
+    frameRate?: CameraRate,
+  ) =>
     onProgress?.({
       transferId,
-      k: encoder.k,
+      k: stream?.k,
       soundSent,
-      qrSent,
-      codes,
+      cameraFrames,
+      cameraFresh,
+      freshBytes,
       via,
       symbolIds,
       acked,
-      rate: via === "qr" ? rate : undefined,
-    });
-
-  /** Queued blocks first, then fresh symbols; the last packet gets `lastType`. */
-  const batch = (count: number, lastType: PacketType): Packet[] =>
-    Array.from({ length: count }, (_, i) => {
-      const type = i === count - 1 ? lastType : PacketType.Data;
-      const id = wanted.shift();
-      if (id === undefined) {
-        fresh++;
-        return encoder.next(type);
-      }
-      queued.delete(id);
-      return encoder.symbol(id, type);
+      share,
+      rate: frameRate,
     });
 
   const unsubscribe = listen.onPacket((bytes) => {
@@ -136,66 +133,62 @@ export async function sendBundle(
     if (packet?.transferId !== transferId) return;
     if (packet.type === PacketType.Done) heardDone.abort();
     if (packet.type !== PacketType.Ack) return;
-    if (qr?.adapt) {
+    const heard = ackShare(packet.data);
+    if (heard !== undefined) share = heard;
+    if (camera?.adapt && sending) {
       // ponytail: the receiver's stretch since its last ack can straddle a
       // rate change by the ack's flight time; ignored.
-      const share = ackShare(packet.data);
-      quietSince = fresh;
+      quietSince = sending.fresh;
       everAcked = true;
-      if (share !== undefined) retune({ heard: share });
+      if (heard !== undefined) retune({ heard });
     }
-    for (const { start, length } of decodeAck(packet.data)) {
-      for (let id = start; id < start + length && id < encoder.k; id++) {
-        if (queued.has(id)) continue;
-        queued.add(id);
-        wanted.push(id);
-        acked++;
-      }
-    }
+    const runs = decodeAck(packet.data);
+    onAck?.(runs, heard);
+    acked += (stream ?? sending)?.resend(runs) ?? 0;
   });
 
   try {
-    while (!stop.aborted) {
-      if (sound) {
-        const { channel, listenEvery, windowMs } = sound;
-        const symbols = batch(listenEvery, PacketType.DataListen);
+    if (sound && stream) {
+      const { channel, listenEvery, windowMs } = sound;
+      const blockBytes = dataBytes(SOUND_PACKET_BYTES, stream.k);
+      while (!stop.aborted) {
+        const symbols = stream.next(listenEvery, PacketType.DataListen);
         await channel.send(symbols.map(encodePacket), stop);
         if (stop.aborted) break;
         soundSent += symbols.length;
+        freshBytes = stream.fresh * blockBytes;
         progress("sound", symbols.map((s) => s.symbolId));
         await sleep(windowMs, stop);
-      } else if (qr) {
-        const symbols = batch(rate.packetsPerCode, PacketType.Data);
-        qr.display.show(symbols.map(encodePacket));
-        qrSent += symbols.length;
-        codes++;
-        progress("qr", symbols.map((s) => s.symbolId));
+      }
+    } else if (camera) {
+      sending = camera.encoder.start(bundle, transferId, rate!, stop, (f) => {
+        cameraFrames = f.frames;
+        cameraFresh = f.fresh;
+        freshBytes = f.freshBytes;
+        progress("camera", f.symbolIds ?? [], f.rate);
         if (
-          qr.adapt && everAcked && fresh - quietSince >= qr.adapt.silentAfter
+          camera.adapt && everAcked &&
+          f.fresh - quietSince >= camera.adapt.silentAfter
         ) {
           retune({ silent: true });
         }
-        await sleep(1000 / rate.fps, stop);
-      }
+      });
+      await sending.done;
     }
   } catch (err) {
     if (!stop.aborted) throw err;
   } finally {
     unsubscribe();
-    qr?.display.clear();
   }
   return heardDone.signal.aborted ? "done" : "stopped";
 }
 
 export interface ReceiveProgress {
-  heard: number;
-  soundHeard: number;
-  sourceHeard: number;
-  sourceNew: number;
-  rejected: number;
   /** Acks sent. */
   acked: number;
-  transfers: TransferProgress[];
+  sound: PacketStats;
+  /** `via`: the name of the decoder the transfer belongs to. */
+  transfers: (TransferStatus & { via: string })[];
 }
 
 export interface Received {
@@ -206,17 +199,18 @@ export interface Received {
 export interface ReceiveOptions {
   /** DONE goes out here; silence and DataListen rules count only this channel. */
   sound: PacketChannel;
-  sources?: PacketSource[];
+  /** A transfer belongs to the decoder that first reports it. */
+  camera?: TransferDecoder[];
   silenceMs: number;
   /** Wait before each DONE or ack, so it lands after the sender's microphone is rolling again. */
   turnaroundMs?: number;
   /**
-   * Ack every this many new symbols heard, resends included; undefined never
-   * acks. Counting starts at a transfer's first symbol from a source, or at
-   * its first repair symbol when it comes by sound. Every ack reports the
-   * fresh symbols heard, for a sender adapting its rate; it names missing
-   * blocks only once a repair symbol was heard (the first pass is over). A
-   * bundle that finishes inside the period never acks.
+   * Ack every this many new units heard, resends included; undefined never
+   * acks. Each decoder says when its units start counting: by sound, at a
+   * transfer's first repair symbol. Every ack reports the fresh units heard,
+   * for a sender adapting its rate; a packet decoder names missing blocks only
+   * once a repair symbol was heard (the first pass is over). A bundle that
+   * finishes inside the period never acks.
    */
   ackEvery?: number;
   signal: AbortSignal;
@@ -232,7 +226,7 @@ export function receiveBundle(
 ): Promise<Received | undefined> {
   const {
     sound,
-    sources = [],
+    camera = [],
     silenceMs,
     turnaroundMs = 0,
     ackEvery,
@@ -244,13 +238,14 @@ export function receiveBundle(
   } = options;
 
   return new Promise((resolve, reject) => {
-    const receiver = new Receiver();
-    let soundHeard = 0;
-    let sourceHeard = 0;
-    let sourceNew = 0;
-    let rejected = 0;
+    const soundDecoder = packetDecoder(sound, {
+      name: "sound",
+      countFrom: "repair",
+    });
+    const decoders: TransferDecoder[] = [soundDecoder, ...camera];
+    /** The decoder each transfer belongs to: the first that reported it. */
+    const owner = new Map<number, TransferDecoder>();
     let acked = 0;
-    const seenSymbols = new Set<number>();
     let received: Received | undefined;
     let doneSent = false;
     let heardSinceDone = false;
@@ -259,18 +254,30 @@ export function receiveBundle(
     let timer: ReturnType<typeof setTimeout> | undefined;
     let completions = Promise.resolve();
     const lastSound = new Map<number, number>();
-    /** Per transfer, once counting began: new symbols since then or since the last ack. */
+    /** Per transfer, once counting began: new units since then or since the last ack. */
     const heardSince = new Map<number, number>();
-    /** Per transfer: the highest symbol id heard, and how many arrived above the highest before them. Fresh symbols go out in id order and resends are always lower, so `heard` counts fresh ones. */
-    const fresh = new Map<number, { highest: number; heard: number }>();
-    /** Per transfer: `fresh` as of the last ack, or just below the first id heard, so a share needs no knowledge of when the sender began. */
-    const base = new Map<number, { highest: number; heard: number }>();
-    /** Transfers with a repair symbol heard: their missing blocks were all sent once. */
-    const repairing = new Set<number>();
     /** Transfer whose ack waits for the next DataListen. */
     let ackPending: number | undefined;
     /** Completion's DONE-or-silence step, held while an ack is in flight. */
     let afterAck: (() => void) | undefined;
+
+    const claim = (decoder: TransferDecoder, transferId: number) => {
+      const o = owner.get(transferId);
+      if (o && o !== decoder) return false;
+      owner.set(transferId, decoder);
+      return true;
+    };
+
+    const progress = () =>
+      onProgress?.({
+        acked,
+        sound: { ...soundDecoder.stats },
+        transfers: decoders.flatMap((d) =>
+          d.status()
+            .filter((t) => (owner.get(t.transferId) ?? d) === d)
+            .map((t) => ({ ...t, via: d.name }))
+        ),
+      });
 
     const armSilence = () => {
       if (finished || sending) return;
@@ -332,27 +339,19 @@ export function receiveBundle(
           await sleep(turnaroundMs, signal);
           if (finished || received) return;
         }
-        const transfer = receiver.progress().find((t) =>
-          t.transferId === transferId
-        );
-        if (!transfer) return;
-        const runs = repairing.has(transferId)
-          ? transfer.missing(ACK_RUNS)
-          : [];
-        const { highest, heard } = fresh.get(transferId)!;
-        const from = base.get(transferId)!;
-        const span = highest - from.highest;
-        const share = span > 0 ? (heard - from.heard) / span : undefined;
+        const report = owner.get(transferId)?.ack(transferId, ACK_RUNS);
+        if (!report) return;
+        const { k, highest, heard, share, runs } = report;
         await sound.send([
           encodePacket({
             type: PacketType.Ack,
             transferId,
-            k: transfer.k,
+            k,
             symbolId: highest,
             data: encodeAck(
               runs,
               heard,
-              dataBytes(SOUND_PACKET_BYTES, transfer.k),
+              dataBytes(SOUND_PACKET_BYTES, k),
               share,
             ),
           }),
@@ -360,7 +359,6 @@ export function receiveBundle(
         if (finished) return;
         acked++;
         heardSince.set(transferId, 0);
-        base.set(transferId, { highest, heard });
         onAck?.(transferId, runs, share);
       } catch (err) {
         if (!signal.aborted) finish(err);
@@ -375,23 +373,28 @@ export function receiveBundle(
       }
     };
 
-    const complete = async (completed: Completed, soundListen: boolean) => {
+    const complete = async (
+      decoder: TransferDecoder,
+      transferId: number,
+      bundle: Uint8Array,
+      at: { listen: boolean },
+    ) => {
       if (received) return;
       let items: Item[];
       try {
-        items = await decodeBundle(completed.bundle);
+        items = await decodeBundle(bundle);
       } catch (err) {
         if (!(err instanceof BundleError)) throw err;
-        receiver.forget(completed.transferId);
+        decoder.forget(transferId);
         return;
       }
       if (finished) return;
-      received = { transferId: completed.transferId, items };
-      const soundAt = lastSound.get(completed.transferId);
+      received = { transferId, items };
+      const soundAt = lastSound.get(transferId);
       lastSound.clear();
       onComplete?.(received);
       const kick = () =>
-        soundListen || soundAt === undefined ||
+        at.listen || soundAt === undefined ||
           Date.now() - soundAt >= silenceMs
           ? sendDone()
           : armSilence();
@@ -399,85 +402,55 @@ export function receiveBundle(
       else kick();
     };
 
-    const hearSymbol = (packet: Packet, fromSound: boolean) => {
-      let isNew = false;
-      if (packet.type !== PacketType.Done) {
-        const key = packet.transferId * 2 ** 24 + packet.symbolId;
-        isNew = !seenSymbols.has(key);
-        seenSymbols.add(key);
-        if (!fromSound && isNew) sourceNew++;
-        if (!fresh.has(packet.transferId)) {
-          base.set(packet.transferId, {
-            highest: packet.symbolId - 1,
-            heard: 0,
-          });
-        }
-        const seen = fresh.get(packet.transferId) ?? { highest: -1, heard: 0 };
-        if (packet.symbolId > seen.highest) {
-          seen.highest = packet.symbolId;
-          seen.heard++;
-        }
-        fresh.set(packet.transferId, seen);
-        if (packet.symbolId >= packet.k) repairing.add(packet.transferId);
-      }
-      const soundListen = fromSound && packet.type === PacketType.DataListen;
-      if (fromSound && !received && packet.type !== PacketType.Done) {
-        lastSound.set(packet.transferId, Date.now());
-      }
-      const completed = receiver.push(packet, Date.now());
-      if (completed) {
-        completions = completions
-          .then(() => complete(completed, soundListen))
-          .catch(finish);
-      } else if (
-        received?.transferId === packet.transferId &&
-        packet.type !== PacketType.Done
-      ) {
+    const onCompleted = (decoder: TransferDecoder) =>
+    (
+      transferId: number,
+      bundle: Uint8Array,
+      unit?: TransferHeard,
+    ) => {
+      if (finished || !claim(decoder, transferId)) return;
+      const fromSound = decoder === soundDecoder;
+      if (fromSound && !received) lastSound.set(transferId, Date.now());
+      const at = { listen: fromSound && unit?.listen === true };
+      completions = completions
+        .then(() => complete(decoder, transferId, bundle, at))
+        .catch(finish);
+      if (!fromSound) progress();
+    };
+
+    const onHeard = (decoder: TransferDecoder) => (h: TransferHeard) => {
+      if (finished) return;
+      const { transferId } = h;
+      const fromSound = decoder === soundDecoder;
+      const soundListen = fromSound && h.listen === true;
+      if (fromSound && !received) lastSound.set(transferId, Date.now());
+      if (received?.transferId === transferId) {
         if (doneSent) heardSinceDone = true;
         if (soundListen) sendDone();
         else if (fromSound) armSilence();
-      } else if (
-        ackEvery !== undefined && !received && packet.type !== PacketType.Done
-      ) {
-        const { transferId } = packet;
-        const counting = heardSince.has(transferId) ||
-          packet.symbolId >= packet.k || !fromSound;
-        if (isNew && counting) {
-          const heard = (heardSince.get(transferId) ?? 0) + 1;
-          heardSince.set(transferId, heard);
-          if (heard >= ackEvery) tryAck(transferId);
+      } else if (!received) {
+        // One transfer shows once in progress: its owner's.
+        if (!claim(decoder, transferId)) return;
+        if (ackEvery !== undefined) {
+          if (h.fresh > 0 && h.counting) {
+            const heard = (heardSince.get(transferId) ?? 0) + h.fresh;
+            heardSince.set(transferId, heard);
+            if (heard >= ackEvery) tryAck(transferId);
+          }
+          if (soundListen && ackPending === transferId) sendAck(transferId);
         }
-        if (soundListen && ackPending === transferId) sendAck(transferId);
       }
-    };
-
-    const hear = (bytes: Uint8Array, fromSound: boolean) => {
-      if (finished) return;
-      const packet = decodePacket(bytes);
-      if (!packet) {
-        rejected++;
-      } else {
-        if (fromSound) soundHeard++;
-        else sourceHeard++;
-        // Another receiver's ack is neither a symbol nor sound from the sender.
-        if (packet.type !== PacketType.Ack) hearSymbol(packet, fromSound);
-      }
-      onProgress?.({
-        heard: soundHeard + sourceHeard,
-        soundHeard,
-        sourceHeard,
-        sourceNew,
-        rejected,
-        acked,
-        transfers: receiver.progress(),
-      });
+      // Sound progress goes out on every packet, below; camera's here.
+      if (!fromSound) progress();
     };
 
     const unsubscribes = [
-      sound.onPacket((bytes) => hear(bytes, true)),
-      ...sources.map((source) =>
-        source.onPacket((bytes) => hear(bytes, false))
-      ),
+      ...decoders.flatMap((d) => [
+        d.onComplete(onCompleted(d)),
+        d.onHeard(onHeard(d)),
+      ]),
+      // After the decoder's own listener, so rejected bytes show too.
+      sound.onPacket(() => finished || progress()),
     ];
 
     const finish = (err?: unknown) => {
@@ -485,6 +458,7 @@ export function receiveBundle(
       finished = true;
       clearTimeout(timer);
       for (const unsubscribe of unsubscribes) unsubscribe();
+      soundDecoder.close();
       signal.removeEventListener("abort", onAbort);
       if (err === undefined) resolve(received);
       else reject(err);

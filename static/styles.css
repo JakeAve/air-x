@@ -689,13 +689,39 @@ pre {
   white-space: pre-wrap;
 }
 
-/* As big a square as the viewport allows, centred even where it overflows the column. */
+/* A camera send covers the window: the code as big a square as fits above
+   one progress line and Stop. Outside <main>, whose turnstile transform would
+   trap position: fixed. */
+.camera-frame {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: 1fr auto auto;
+  justify-items: center;
+  align-items: center;
+  gap: 1rem;
+  padding: var(--gap);
+  background: var(--bg);
+}
+
+.camera-frame p {
+  margin: 0;
+}
+
+.camera-frame button {
+  max-width: 36rem;
+}
+
 .qr {
-  --qr-size: calc(min(100vw, 100dvh) - 2 * var(--gap));
+  /* 7.75rem: the line (1.5rem), Stop (3.25rem), and two 1rem gaps under it. */
+  --qr-size: min(
+    100vw - 2 * var(--gap),
+    100dvh - 2 * var(--gap) - 7.75rem
+  );
   display: block;
   width: var(--qr-size);
   height: var(--qr-size);
-  margin-inline: calc(50% - var(--qr-size) / 2);
   background: #ffffff;
   image-rendering: pixelated;
 }

@@ -1,15 +1,16 @@
-import { openDevices } from "@/adapters/pageLink.ts";
+import {
+  type cameraCodecs,
+  cameraSeconds,
+  openDevices,
+} from "@/adapters/pageLink.ts";
 import type { QrTransport } from "@/adapters/qrTransport.ts";
 import type { SoundTransport } from "@/adapters/soundTransport.ts";
 import { encodeBundle, type Item } from "@/lib/bundle.ts";
+import { OVERHEAD } from "@/lib/cameraCodec.ts";
 import { blockCount } from "@/lib/fountain/symbols.ts";
 import { receiveBundle, sendBundle } from "@/lib/session.ts";
-import {
-  PACKET_SECONDS,
-  QR_PACKET_BYTES,
-  SOUND_PACKET_BYTES,
-} from "@/lib/protocol.ts";
-import { ladderPolicy, SILENT_AFTER } from "@/lib/rate.ts";
+import { PACKET_SECONDS, SOUND_PACKET_BYTES } from "@/lib/protocol.ts";
+import { type CameraRate, ladderPolicy, SILENT_AFTER } from "@/lib/rate.ts";
 import type { QrEcc } from "@/lib/qr/qrEncoder.ts";
 import type { SoundProtocol } from "@/lib/sound/ggwave.ts";
 
@@ -17,8 +18,8 @@ const SILENCE_MS = 12_000;
 /** How often a receive logs what its camera scan has seen. */
 const SCAN_REPORT_MS = 5_000;
 const SOUND_DEFAULT_MAX_BYTES = 2048;
-/** Packets the sender expects to need: k plus 10 % repair. */
-const OVERHEAD = 1.1;
+/** Grid cells for a transfer whose codec reports a share, not blocks. */
+const SHARE_CELLS = 64;
 
 function $<T extends HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
@@ -41,6 +42,10 @@ const protocolSelect = $<HTMLSelectElement>("protocol");
 const listenEveryInput = $<HTMLInputElement>("listen-every");
 const windowMsInput = $<HTMLInputElement>("window-ms");
 const qrCanvas = $<HTMLCanvasElement>("qr-canvas");
+const cameraFrame = $<HTMLDivElement>("camera-frame");
+const cameraLine = $<HTMLParagraphElement>("camera-line");
+const cameraStop = $<HTMLButtonElement>("camera-stop");
+const cameraCodecSelect = $<HTMLSelectElement>("camera-codec");
 const sendButton = $<HTMLButtonElement>("send");
 const receiveForm = $<HTMLDivElement>("receive-form");
 const receiveRun = $<HTMLDivElement>("receive-run");
@@ -73,6 +78,10 @@ function about(s: number): string {
   if (s < 90) return `about ${Math.round(s)} s`;
   if (s < 5400) return `about ${Math.round(s / 60)} min`;
   return `about ${(s / 3600).toFixed(1)} h`;
+}
+
+function percent(share: number | undefined): string {
+  return share === undefined ? "–" : `${Math.round(share * 100)}%`;
 }
 
 function size(bytes: number): string {
@@ -164,7 +173,18 @@ const turnaroundMs = () => Math.max(0, Number(turnaroundMsInput.value) || 0);
 
 const sendBy = () =>
   (document.querySelector('input[name="send-by"]:checked') as HTMLInputElement)
-    .value as "qr" | "sound";
+    .value as "camera" | "sound";
+
+type CodecName = keyof ReturnType<typeof cameraCodecs>;
+const cameraCodec = () => cameraCodecSelect.value as CodecName;
+
+function showCodecFields() {
+  for (const el of document.querySelectorAll<HTMLElement>("[data-codec]")) {
+    el.hidden = el.dataset.codec !== cameraCodec();
+  }
+}
+showCodecFields();
+cameraCodecSelect.addEventListener("change", showCodecFields);
 
 let windowEdited = false;
 let turnaroundEdited = false;
@@ -192,17 +212,21 @@ scanMaxEdgeInput.addEventListener("change", () => {
   if (devices) devices.qr.scanMaxEdge = positive(scanMaxEdgeInput, 1280);
 });
 
-type Devices = { sound: SoundTransport; qr: QrTransport };
+type Devices = {
+  sound: SoundTransport;
+  qr: QrTransport;
+  codecs: ReturnType<typeof cameraCodecs>;
+};
 let devices: Devices | undefined;
 let opening: Promise<Devices> | undefined;
 
 function getDevices(): Promise<Devices> {
   opening ??= openDevices(qrCanvas, preview).then(
-    ({ sound, qr, sampleRate }) => {
+    ({ sound, qr, codecs, sampleRate }) => {
       sound.log = log;
       sound.protocol = protocol();
       qr.scanMaxEdge = positive(scanMaxEdgeInput, 1280);
-      devices = { sound, qr };
+      devices = { sound, qr, codecs };
       log(`audio context at ${sampleRate} Hz`);
       return devices;
     },
@@ -241,7 +265,7 @@ function rates() {
     fps,
     listenEvery,
     windowMs,
-    qrPerSecond: packetsPerCode * fps,
+    cameraRate: { packetsPerCode, fps },
     soundPerSecond,
   };
 }
@@ -330,17 +354,16 @@ function itemsChanged() {
       return;
     }
     if (!sendByEdited) {
-      const pick = bytes <= SOUND_DEFAULT_MAX_BYTES ? "sound" : "qr";
+      const pick = bytes <= SOUND_DEFAULT_MAX_BYTES ? "sound" : "camera";
       (document.querySelector(
         `input[name="send-by"][value="${pick}"]`,
       ) as HTMLInputElement).checked = true;
     }
-    const qrN = Math.ceil(OVERHEAD * blockCount(bytes, QR_PACKET_BYTES));
     const soundN = Math.ceil(OVERHEAD * blockCount(bytes, SOUND_PACKET_BYTES));
-    const { qrPerSecond, soundPerSecond } = rates();
+    const { cameraRate, soundPerSecond } = rates();
     sendEstimate.textContent = `${size(bytes)} · ${
-      about(qrN / qrPerSecond)
-    } by QR · ${about(soundN / soundPerSecond)} by sound`;
+      about(cameraSeconds[cameraCodec()](bytes, cameraRate))
+    } by camera · ${about(soundN / soundPerSecond)} by sound`;
   }, 300);
 }
 sendForm.addEventListener("input", itemsChanged);
@@ -349,6 +372,7 @@ sendFiles.addEventListener(
   () => setPicked([...sendFiles.files ?? []]),
 );
 sendFilesClear.addEventListener("click", () => setPicked([]));
+cameraStop.addEventListener("click", () => running?.abort());
 
 sendButton.addEventListener("click", async () => {
   if (running) {
@@ -362,7 +386,10 @@ sendButton.addEventListener("click", async () => {
   let stopTicker: (() => void) | undefined;
   let result: "done" | "stopped" | undefined;
   try {
-    const [{ sound, qr }, items] = await Promise.all([opened, collectItems()]);
+    const [{ sound, qr, codecs }, items] = await Promise.all([
+      opened,
+      collectItems(),
+    ]);
     if (!items.length) {
       log("send: nothing to send");
       return;
@@ -376,75 +403,101 @@ sendButton.addEventListener("click", async () => {
     sound.protocol = protocol();
     qr.ecc = eccSelect.value as QrEcc;
     const bundle = await encodeBundle(items);
-    const {
-      packetsPerCode,
-      fps,
-      listenEvery,
-      windowMs,
-      qrPerSecond,
-      soundPerSecond,
-    } = rates();
-    const perSecond = by === "qr" ? qrPerSecond : soundPerSecond;
+    const { listenEvery, windowMs, cameraRate, soundPerSecond } = rates();
+    const codec = cameraCodec();
+    const encoder = codecs[codec].encoder;
     const n = Math.ceil(
-      OVERHEAD * blockCount(
-        bundle.length,
-        by === "qr" ? QR_PACKET_BYTES : SOUND_PACKET_BYTES,
-      ),
+      OVERHEAD * blockCount(bundle.length, SOUND_PACKET_BYTES),
     );
     sendTitle.textContent = "sending";
     sendForm.hidden = true;
     sendRun.hidden = false;
-    qrCanvas.hidden = by !== "qr";
-    gridReset("send-grid", n, $("send-grid").clientWidth, innerHeight / 2);
-    show("send-count", `0 of ${n} packets`);
+    cameraFrame.hidden = by !== "camera";
+    $("send-grid").hidden = by !== "sound";
+    if (by === "sound") {
+      gridReset("send-grid", n, $("send-grid").clientWidth, innerHeight / 2);
+      show("send-count", `0 of ${n} packets`);
+    } else {
+      show("send-count", "–");
+      cameraLine.textContent = "Heard – · 0.0 KB/s";
+    }
     sendButton.textContent = "Stop";
     sendButton.classList.remove("primary");
     const start = performance.now();
     stopTicker = ticker(
       "send-time",
       start,
-      ` of ${about(n / perSecond)}`,
+      ` of ${
+        about(
+          by === "camera"
+            ? encoder.seconds(bundle.length, cameraRate)
+            : n / soundPerSecond,
+        )
+      }`,
     );
     log(
       `send: ${items.length} item(s), ${bundle.length} bytes` +
-        (by === "qr"
-          ? `, QR code ${packetsPerCode}/code @ ${fps} fps ${qr.ecc}${
+        (by === "camera"
+          ? `, camera ${
+            encoder.name === "qr" ? "QR code" : encoder.name
+          } ${cameraRate.packetsPerCode}/code @ ${cameraRate.fps} fps ${qr.ecc}${
             adaptRateToggle.checked ? ", adaptive" : ""
           }`
           : `, sound ${sound.protocol} listenEvery ${listenEvery} window ${windowMs} ms`),
     );
-    let announced = false;
+    let transfer: number | undefined;
     // Past the first n packets the grid empties and refills once per pass.
     let pass = 0;
-    let ackedSoFar = 0;
-    let rateNow = packetsPerCode * fps;
+    let rateNow: CameraRate = cameraRate;
+    const line = (share: number | undefined, freshBytes: number) =>
+      `Heard ${percent(share)} · ${
+        (freshBytes / 1024 /
+          Math.max(0.001, (performance.now() - start) / 1000))
+          .toFixed(1)
+      } KB/s`;
+    let lastLine = "";
     result = await sendBundle(bundle, {
       listen: sound,
       sound: by === "sound"
         ? { channel: sound, listenEvery, windowMs }
         : undefined,
-      qr: by === "qr"
+      camera: by === "camera"
         ? {
-          display: qr,
-          packetsPerCode,
-          fps,
+          encoder,
+          rate: cameraRate,
           adapt: adaptRateToggle.checked
             ? { policy: ladderPolicy(), silentAfter: SILENT_AFTER }
             : undefined,
         }
         : undefined,
       signal: controller.signal,
+      onAck: (runs, share) =>
+        log(
+          `send: ack heard: ${
+            runs.reduce((sum, r) => sum + r.length, 0)
+          } blocks in ${runs.length} runs, heard ${percent(share)}`,
+        ),
       onProgress: (
-        { transferId, k, soundSent, qrSent, via, symbolIds, acked, rate },
+        { transferId, k, soundSent, via, symbolIds, rate, share, freshBytes },
       ) => {
-        const sent = soundSent + qrSent;
-        if (rate && rate.packetsPerCode * rate.fps !== rateNow) {
-          rateNow = rate.packetsPerCode * rate.fps;
-          log(`send: rate now ${rate.packetsPerCode}/code @ ${rate.fps} fps`);
+        if (transfer === undefined) {
+          transfer = transferId;
+          log(
+            `send: transfer ${transferId}${k === undefined ? "" : `, k ${k}`}`,
+          );
         }
-        if (acked > ackedSoFar) {
-          log(`send: ack heard: ${acked - ackedSoFar} blocks`);
-          ackedSoFar = acked;
+        if (via === "camera") {
+          if (
+            rate &&
+            (rate.packetsPerCode !== rateNow.packetsPerCode ||
+              rate.fps !== rateNow.fps)
+          ) {
+            rateNow = rate;
+            log(`send: rate now ${rate.packetsPerCode}/code @ ${rate.fps} fps`);
+          }
+          lastLine = line(share, freshBytes);
+          cameraLine.textContent = lastLine;
+          return;
         }
         for (const id of symbolIds) {
           if (Math.floor(id / n) > pass) {
@@ -453,16 +506,14 @@ sendButton.addEventListener("click", async () => {
               (cell as HTMLElement).dataset.s = "0";
             }
           }
-          gridMark("send-grid", id % n, via === "qr" ? 2 : 3);
+          gridMark("send-grid", id % n, 3);
         }
         show(
           "send-count",
-          pass ? `${n} packets · pass ${pass + 1}` : `${sent} of ${n} packets`,
+          pass
+            ? `${n} packets · pass ${pass + 1}`
+            : `${soundSent} of ${n} packets`,
         );
-        if (!announced) {
-          announced = true;
-          log(`send: transfer ${transferId}, k ${k}`);
-        }
       },
     });
     const elapsed = seconds(performance.now() - start);
@@ -475,6 +526,7 @@ sendButton.addEventListener("click", async () => {
       stopTicker();
       stopTicker = undefined;
       $("send-grid").hidden = true;
+      if (by === "camera") show("send-count", lastLine);
       show("send-time", `${elapsed} · Delivered`);
     }
   } catch (err) {
@@ -482,7 +534,7 @@ sendButton.addEventListener("click", async () => {
   } finally {
     stopTicker?.();
     running = undefined;
-    qrCanvas.hidden = true;
+    cameraFrame.hidden = true;
     sendRun.hidden = result !== "done";
     sendForm.hidden = false;
     sendTitle.textContent = result === "done" ? "sent" : "send";
@@ -680,8 +732,9 @@ listenButton.addEventListener("click", async () => {
   gridReset("rx-grid", 0, 1, 1);
   show("rx-count", "waiting for a transfer");
   let scanReport: ReturnType<typeof setInterval> | undefined;
+  let decoders: ReturnType<Devices["codecs"][CodecName]["decoder"]>[] = [];
   try {
-    const { sound, qr } = await opened;
+    const { sound, qr, codecs } = await opened;
     scanningQr = cameraToggle.checked;
     await Promise.all([sound.listen(), scanningQr && watchCamera(qr)]);
     for (const url of objectUrls) URL.revokeObjectURL(url);
@@ -707,11 +760,27 @@ listenButton.addEventListener("click", async () => {
         ackEvery ? `${ackEvery} symbols` : "never"
       }`,
     );
-    let counts = "sound 0, QR code 0, rejected 0";
     let shown: number | undefined;
+    // ponytail: every codec decodes the one camera; fan-out comes with a second codec.
+    decoders = scanningQr ? Object.values(codecs).map((c) => c.decoder()) : [];
+    let soundStats = { heard: 0, rejected: 0 };
+    const counts = () => {
+      const heard = Object.keys(codecs).map((name) =>
+        `${name === "qr" ? "QR code" : name} ${
+          decoders.find((d) => d.name === name)?.stats?.heard ?? 0
+        }`
+      );
+      const rejected = decoders.reduce(
+        (sum, d) => sum + (d.stats?.rejected ?? 0),
+        soundStats.rejected,
+      );
+      return `sound ${soundStats.heard}, ${
+        heard.join(", ")
+      }, rejected ${rejected}`;
+    };
     const done = await receiveBundle({
       sound,
-      sources: scanningQr ? [qr] : undefined,
+      camera: decoders.length ? decoders : undefined,
       silenceMs: SILENCE_MS,
       turnaroundMs: turnaround,
       ackEvery: ackEvery || undefined,
@@ -719,38 +788,43 @@ listenButton.addEventListener("click", async () => {
         const blocks = runs.reduce((sum, r) => sum + r.length, 0);
         log(
           `receive: transfer ${transferId} ack: ${blocks} blocks in ${runs.length} runs, heard ${
-            share === undefined ? "-" : `${Math.round(share * 100)}%`
+            percent(share)
           }`,
         );
       },
       signal: controller.signal,
-      onProgress: (
-        {
-          soundHeard,
-          sourceHeard: qrHeard,
-          rejected,
-          transfers,
-        },
-      ) => {
-        counts =
-          `sound ${soundHeard}, QR code ${qrHeard}, rejected ${rejected}`;
+      onProgress: ({ sound: heard, transfers }) => {
+        soundStats = heard;
         const t = transfers.reduce(
-          (best, t) => t.resolved > best.resolved ? t : best,
+          (best, t) => t.progress > best.progress ? t : best,
           transfers[0],
         );
-        if (t) {
-          if (t.transferId !== shown) {
-            shown = t.transferId;
-            gridReset(
-              "rx-grid",
-              t.k,
-              $("rx-grid").clientWidth,
-              innerHeight / 2,
-            );
-          }
-          gridPaint("rx-grid", t.states());
-          show("rx-count", `${t.resolved} of ${t.k} blocks`);
+        if (!t) return;
+        // A codec without blocks fills SHARE_CELLS in order by its share.
+        const blocks = t.k !== undefined && t.states !== undefined;
+        const cells = blocks ? t.k! : SHARE_CELLS;
+        if (t.transferId !== shown) {
+          shown = t.transferId;
+          gridReset(
+            "rx-grid",
+            cells,
+            $("rx-grid").clientWidth,
+            innerHeight / 2,
+          );
         }
+        gridPaint(
+          "rx-grid",
+          blocks ? t.states!() : Uint8Array.from(
+            { length: cells },
+            (_, i) => i < Math.round(t.progress * cells) ? 2 : 0,
+          ),
+        );
+        show(
+          "rx-count",
+          blocks
+            ? `${Math.round(t.progress * cells)} of ${cells} blocks`
+            : `${percent(t.progress)} heard`,
+        );
       },
       onComplete: ({ transferId, items }) => {
         received = true;
@@ -758,7 +832,7 @@ listenButton.addEventListener("click", async () => {
         log(
           `receive: transfer ${transferId} complete after ${
             seconds(performance.now() - start)
-          }, ${items.length} item(s), ${counts}`,
+          }, ${items.length} item(s), ${counts()}`,
         );
         items.forEach(renderItem);
       },
@@ -778,8 +852,8 @@ listenButton.addEventListener("click", async () => {
     });
     log(
       done
-        ? `receive: finished transfer ${done.transferId}, ${counts}`
-        : `receive: stopped with nothing received, ${counts}`,
+        ? `receive: finished transfer ${done.transferId}, ${counts()}`
+        : `receive: stopped with nothing received, ${counts()}`,
     );
   } catch (err) {
     log(`receive failed: ${err}`);
@@ -787,6 +861,7 @@ listenButton.addEventListener("click", async () => {
     stopTicker?.();
     clearInterval(scanReport);
     running = undefined;
+    for (const d of decoders) d.close();
     scanningQr = false;
     closeCamera();
     receiveRun.hidden = !received;

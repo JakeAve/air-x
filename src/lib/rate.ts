@@ -1,12 +1,15 @@
-/** How fast QR codes go out: `packetsPerCode * fps` packets per second. */
-export interface QrRate {
-  packetsPerCode: number;
+/**
+ * How fast a camera codec's frames go out: `packetsPerCode * fps` packets per
+ * second. A codec whose only knob is fps leaves `packetsPerCode` out (1).
+ */
+export interface CameraRate {
   fps: number;
+  packetsPerCode?: number;
 }
 
 /** One ack's worth of what the receiver saw, all at `rate` as far as the sender knows. */
 export interface RateSample {
-  rate: QrRate;
+  rate: CameraRate;
   /**
    * Share of fresh symbols the receiver heard since its last ack, counted
    * from the first id it saw to the highest: 0 to 1. Measured on the
@@ -23,14 +26,14 @@ export interface RateSample {
  * (the same rate to hold). `sendBundle` knows nothing else about the choice,
  * so a different engine is a different function.
  */
-export type RatePolicy = (sample: RateSample) => QrRate;
+export type RatePolicy = (sample: RateSample) => CameraRate;
 
 /** Fresh symbols a sender shows with no report heard before it tells the policy so. */
 export const SILENT_AFTER = 240;
 
 export interface LadderOptions {
   /** The rates to move between, in strictly rising packets per second. */
-  ladder: QrRate[];
+  ladder: CameraRate[];
   /** Step up when at least this share of the sent symbols was heard. */
   raiseAt: number;
   /** Step down when less than this share was heard, or on silence. */
@@ -56,7 +59,7 @@ export const LADDER_DEFAULTS: LadderOptions = {
   retryAfter: 4,
 };
 
-const perSecond = (rate: QrRate) => rate.packetsPerCode * rate.fps;
+const perSecond = (rate: CameraRate) => (rate.packetsPerCode ?? 1) * rate.fps;
 
 /**
  * One step up the ladder on a good sample, one down on a bad one, hold in

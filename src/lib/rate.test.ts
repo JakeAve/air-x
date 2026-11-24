@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
-import { ladderPolicy, type QrRate } from "./rate.ts";
+import { type CameraRate, ladderPolicy } from "./rate.ts";
 
-const ladder: QrRate[] = [
+const ladder: CameraRate[] = [
   { packetsPerCode: 2, fps: 5 },
   { packetsPerCode: 4, fps: 5 },
   { packetsPerCode: 8, fps: 5 },
@@ -43,7 +43,7 @@ Deno.test("a rate off the ladder moves to the nearest step in the direction take
 
 Deno.test("a rate that failed is not retried until retryAfter samples later", () => {
   const policy = ladderPolicy(options);
-  const good = (rate: QrRate) => policy({ rate, heard: 1 });
+  const good = (rate: CameraRate) => policy({ rate, heard: 1 });
   assertEquals(policy({ rate: ladder[2], heard: 0 }), ladder[1]);
   assertEquals(good(ladder[1]), ladder[1]);
   assertEquals(good(ladder[1]), ladder[1]);
@@ -52,4 +52,12 @@ Deno.test("a rate that failed is not retried until retryAfter samples later", ()
 
 Deno.test("an ack with no share holds the rate", () => {
   assertEquals(ladderPolicy(options)({ rate: ladder[1] }), ladder[1]);
+});
+
+Deno.test("an fps-only ladder steps up and down", () => {
+  const policy = ladderPolicy({
+    ladder: [{ fps: 5 }, { fps: 8 }, { fps: 12 }],
+  });
+  assertEquals(policy({ rate: { fps: 5 }, heard: 1 }), { fps: 8 });
+  assertEquals(policy({ rate: { fps: 8 }, heard: 0.2 }), { fps: 5 });
 });

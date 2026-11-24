@@ -49,20 +49,20 @@ Open Sans, self-hosted variable file at `static/fonts/open-sans.woff2` (weights
 300 to 800, OFL). Fallback stack: `"Segoe UI", "Segoe WP", system-ui`. Root is
 16px; everything else is rem.
 
-| Role                                             | Size                                      | Weight               | Case                                           |
-| ------------------------------------------------ | ----------------------------------------- | -------------------- | ---------------------------------------------- |
-| App title (`.app`)                               | 0.9375rem                                 | 600, tracking 0.16em | UPPERCASE                                      |
-| Page title (`h1`)                                | 4rem, line-height 0.95, tracking -0.025em | 300                  | lowercase, one word: `send`, `sending`, `sent` |
-| Group heading (`h2`), progress count             | 1.5rem                                    | 300                  | lowercase                                      |
-| Controls: button text                            | 1.25rem                                   | 600                  | Sentence case                                  |
-| Inputs, radio and switch labels, lede, item text | 1.125rem                                  | 400 (lede 300)       | Sentence case                                  |
-| Body, links, muted lines                         | 1rem                                      | 400                  | Sentence case                                  |
-| Field labels, item meta                          | 0.875rem                                  | 400                  | Sentence case                                  |
+| Role                                             | Size                                      | Weight         | Case                                                        |
+| ------------------------------------------------ | ----------------------------------------- | -------------- | ----------------------------------------------------------- |
+| App title (`.app`)                               | 0.9375rem                                 | 600            | Sentence case: `Air X`                                      |
+| Page title (`h1`)                                | 4rem, line-height 0.95, tracking -0.025em | 300            | lowercase, one word: `send`, `sending`, `sent`              |
+| Group heading (`h2`), progress count             | 1.5rem                                    | 300            | Sentence case for group headings; progress count as written |
+| Controls: button text                            | 1.25rem                                   | 600            | Sentence case                                               |
+| Inputs, radio and switch labels, lede, item text | 1.125rem                                  | 400 (lede 300) | Sentence case                                               |
+| Body, links, muted lines                         | 1rem                                      | 400            | Sentence case                                               |
+| Field labels, item meta                          | 0.875rem                                  | 400            | Sentence case                                               |
 
-Lowercase is for the big light words: page titles, tiles, group headings,
-expander summaries. Anything a person reads as an instruction or a value is
-sentence case with real capitals (`QR code`, `Start over`,
-`Scan QR with
+Lowercase is for the big light words only: page titles, tiles and the home
+wordmark `air x`. No all caps anywhere. Group headings, expander summaries, and
+anything a person reads as an instruction or a value is sentence case with real
+capitals (`QR code`, `Start over`, `Scan QR with
 camera`).
 
 ## Spacing

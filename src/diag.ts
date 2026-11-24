@@ -371,7 +371,7 @@ sendButton.addEventListener("click", async () => {
     try {
       await sound.listen();
     } catch (err) {
-      log(`send: microphone unavailable, DONE will not be heard (${err})`);
+      log(`send: microphone unavailable, cannot confirm delivery (${err})`);
     }
     sound.protocol = protocol();
     qr.ecc = eccSelect.value as QrEcc;
@@ -408,7 +408,7 @@ sendButton.addEventListener("click", async () => {
     log(
       `send: ${items.length} item(s), ${bundle.length} bytes` +
         (by === "qr"
-          ? `, qr ${packetsPerCode}/code @ ${fps} fps ${qr.ecc}${
+          ? `, QR code ${packetsPerCode}/code @ ${fps} fps ${qr.ecc}${
             adaptRateToggle.checked ? ", adaptive" : ""
           }`
           : `, sound ${sound.protocol} listenEvery ${listenEvery} window ${windowMs} ms`),
@@ -468,14 +468,14 @@ sendButton.addEventListener("click", async () => {
     const elapsed = seconds(performance.now() - start);
     log(
       result === "done"
-        ? `send: DONE heard after ${elapsed}`
+        ? `send: done heard after ${elapsed}`
         : `send: stopped after ${elapsed}`,
     );
     if (result === "done") {
       stopTicker();
       stopTicker = undefined;
       $("send-grid").hidden = true;
-      show("send-time", `${elapsed} · DONE heard`);
+      show("send-time", `${elapsed} · Delivered`);
     }
   } catch (err) {
     log(`send failed: ${err}`);
@@ -707,7 +707,7 @@ listenButton.addEventListener("click", async () => {
         ackEvery ? `${ackEvery} symbols` : "never"
       }`,
     );
-    let counts = "sound 0, qr 0, rejected 0";
+    let counts = "sound 0, QR code 0, rejected 0";
     let shown: number | undefined;
     const done = await receiveBundle({
       sound,
@@ -732,7 +732,8 @@ listenButton.addEventListener("click", async () => {
           transfers,
         },
       ) => {
-        counts = `sound ${soundHeard}, qr ${qrHeard}, rejected ${rejected}`;
+        counts =
+          `sound ${soundHeard}, QR code ${qrHeard}, rejected ${rejected}`;
         const t = transfers.reduce(
           (best, t) => t.resolved > best.resolved ? t : best,
           transfers[0],
@@ -764,9 +765,12 @@ listenButton.addEventListener("click", async () => {
       onDone: (transferId) => {
         stopTicker?.();
         stopTicker = undefined;
-        show("rx-time", `${seconds(performance.now() - start)} · DONE sent`);
+        show(
+          "rx-time",
+          `${seconds(performance.now() - start)} · Confirmation sent`,
+        );
         log(
-          `receive: DONE sent for ${transferId} after ${
+          `receive: done sent for ${transferId} after ${
             seconds(performance.now() - start)
           }`,
         );

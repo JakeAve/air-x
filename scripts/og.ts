@@ -22,7 +22,7 @@ const card = `<!DOCTYPE html><meta charset="utf-8"><style>
 ${mark}
 <span class="app">Air X</span>
 <h1>air x</h1>
-<p>Pass text and files to the device next to you by sound or QR code. No server, no account.</p>`;
+<p>Transfer data between devices without a network connection. Use sound or a QR code.</p>`;
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1200, height: 630 } });

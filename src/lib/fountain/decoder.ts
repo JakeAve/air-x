@@ -52,8 +52,16 @@ export class Decoder {
   /** Per block: 0 unseen, 1 covered by a pending symbol, 2 resolved. */
   states(): Uint8Array {
     const out = new Uint8Array(this.#k ?? 0);
+    // A repair symbol above DENSE_MAX_K covers intermediates, not blocks, so
+    // each one heard marks the next missing block tentative instead.
+    let repairs = this.#raptor?.repairs ?? 0;
     for (let b = 0; b < out.length; b++) {
-      out[b] = this.#isResolved[b] ? 2 : this.#pendingByBlock[b]?.size ? 1 : 0;
+      if (this.#isResolved[b]) out[b] = 2;
+      else if (this.#pendingByBlock[b]?.size) out[b] = 1;
+      else if (repairs > 0) {
+        out[b] = 1;
+        repairs--;
+      }
     }
     return out;
   }
@@ -105,6 +113,7 @@ export class Decoder {
           stride,
           isis: [],
           blocks: new Uint32Array(64 * stride),
+          repairs: 0,
         };
       } else {
         this.#pendingByBlock = Array.from(
@@ -162,6 +171,7 @@ export class Decoder {
       this.#isResolved[packet.symbolId] = 1;
       if (++this.#resolved === k) return this.#done();
     }
+    if (packet.symbolId >= k) state.repairs++;
     const isi = packet.symbolId < k
       ? packet.symbolId
       : packet.symbolId - k + code.kPad;
@@ -310,6 +320,8 @@ interface RaptorState {
   /** Row of each symbol heard, in arrival order; its data is at the same index in `blocks`. */
   isis: number[];
   blocks: Uint32Array;
+  /** Repair symbols heard, for `states`. */
+  repairs: number;
   /** Set once there were enough symbols to try. */
   solver?: Solver;
 }

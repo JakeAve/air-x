@@ -97,3 +97,17 @@ Deno.test("repair symbols alone decode within a few of k", () => {
     assert(received <= k + 12, `k=${k}: ${received}`);
   }
 });
+
+Deno.test("each repair symbol heard marks one missing block tentative", () => {
+  const k = 300;
+  const bundle = new Uint8Array(k * dataBytes(SOUND_PACKET_BYTES, k));
+  const encoder = new Encoder(bundle, 4, SOUND_PACKET_BYTES);
+  const decoder = new Decoder();
+  for (let id = 0; id < k; id++) if (id % 10) decoder.push(encoder.symbol(id));
+  const count = (state: number) =>
+    decoder.states().filter((s) => s === state).length;
+  assertEquals([count(0), count(1), count(2)], [30, 0, 270]);
+  for (let id = k; id < k + 5; id++) decoder.push(encoder.symbol(id));
+  assertEquals([count(0), count(1), count(2)], [25, 5, 270]);
+  assertEquals(decoder.states()[0], 1);
+});

@@ -298,15 +298,15 @@ export function receiveBundle(
           await sleep(turnaroundMs, signal);
           if (finished) return;
         }
-        await sound.send([
-          encodePacket({
-            type: PacketType.Done,
-            transferId,
-            k: 0,
-            symbolId: 0,
-            data: new Uint8Array(dataBytes(SOUND_PACKET_BYTES, 0)),
-          }),
-        ], signal);
+        const done = encodePacket({
+          type: PacketType.Done,
+          transferId,
+          k: 0,
+          symbolId: 0,
+          data: new Uint8Array(dataBytes(SOUND_PACKET_BYTES, 0)),
+        });
+        // Twice, so one copy lost to noise still lands.
+        await sound.send([done, done], signal);
         if (finished) return;
         doneSent = true;
         heardSinceDone = false;
@@ -425,7 +425,8 @@ export function receiveBundle(
       const soundListen = fromSound && h.listen === true;
       if (fromSound && !received) lastSound.set(transferId, Date.now());
       if (received?.transferId === transferId) {
-        if (doneSent) heardSinceDone = true;
+        // Only sound says the sender missed DONE; a camera is data only.
+        if (doneSent && fromSound) heardSinceDone = true;
         if (soundListen) sendDone();
         else if (fromSound) armSilence();
       } else if (!received) {

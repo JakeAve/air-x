@@ -829,6 +829,10 @@ listenButton.addEventListener("click", async () => {
       onComplete: ({ transferId, items }) => {
         received = true;
         $("rx-grid").hidden = true;
+        // The bundle is whole, so no code is needed; DONE goes on by sound.
+        scanningQr = false;
+        clearInterval(scanReport);
+        closeCamera();
         log(
           `receive: transfer ${transferId} complete after ${
             seconds(performance.now() - start)

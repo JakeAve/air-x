@@ -160,16 +160,17 @@ The protocol layer. Spec: the main checkout's
   encoder's frames at its `rate`, until DONE is heard; Ack packets heard on
   `listen` queue their blocks, and each burst or frame sends queued blocks
   before fresh symbols) and `receiveBundle` (sound plus any `camera` decoders, a
-  transfer belonging to the decoder that first reports it; sends DONE by sound).
-  Silence rules count sound only: once complete, DONE goes out at once if no
-  sound from the transfer was heard within `silenceMs`, else after `silenceMs`
-  of sound silence or on a `DataListen`. After DONE, packets of that transfer
-  (camera included) mean the sender missed it, so silence re-sends DONE; silence
-  with nothing heard since DONE finishes. With `ackEvery` set, the receiver
-  sends an `Ack` by sound every `ackEvery` new symbols (resends included), with
-  DONE's timing and `turnaroundMs`; counting starts at a transfer's first symbol
-  from a decoder, or its first repair symbol when it comes by sound. Every ack
-  reports the highest symbol id and the count of fresh units heard; its runs are
+  transfer belonging to the decoder that first reports it; sends DONE by sound,
+  two copies back to back). Silence rules count sound only: once complete, DONE
+  goes out at once if no sound from the transfer was heard within `silenceMs`,
+  else after `silenceMs` of sound silence or on a `DataListen`. After DONE,
+  sound from that transfer means the sender missed it, so silence re-sends DONE;
+  camera decoders are data only and never trigger a re-send. Silence with no
+  sound heard since DONE finishes. With `ackEvery` set, the receiver sends an
+  `Ack` by sound every `ackEvery` new symbols (resends included), with DONE's
+  timing and `turnaroundMs`; counting starts at a transfer's first symbol from a
+  decoder, or its first repair symbol when it comes by sound. Every ack reports
+  the highest symbol id and the count of fresh units heard; its runs are
   optional (a codec may name no blocks) and a packet decoder names them only
   once a repair symbol was heard. Each ack is a snapshot, so a lost resend is
   simply named again, and the sender ignores blocks already queued. A bundle
@@ -246,7 +247,8 @@ Wire facts (multi-byte fields big-endian):
 - The receiver waits `turnaroundMs` before each DONE: after an ultrasound burst
   the sender's mic takes hundreds of ms to reopen and would miss it.
 - The camera, like the mic, is opened by `watch()` and left rolling for a leg;
-  the diag page closes it when a receive ends.
+  the diag page closes it as soon as a transfer completes (DONE goes on by
+  sound) or the receive ends.
 - It is a PWA: `static/manifest.webmanifest` plus `static/sw.js`, a plain-JS
   service worker that precaches every asset (cache-first, network fallback) so
   the app opens offline. `src/diag.ts` registers it. Airgap's cache gotcha

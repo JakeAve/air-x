@@ -235,7 +235,7 @@ Deno.test("a lost DONE is re-sent on the next DataListen", async () => {
   let dropped = 0;
   const air = new Air({
     seed: 2,
-    drop: (bytes) => isDone(bytes) && dropped++ === 0,
+    drop: (bytes) => isDone(bytes) && dropped++ < 2,
   });
   const stopReceiver = new AbortController();
   let dones = 0;
@@ -254,7 +254,8 @@ Deno.test("a lost DONE is re-sent on the next DataListen", async () => {
   });
 
   assertEquals(sent, "done");
-  assertEquals(dones, 2);
+  // Both copies of the first DONE were dropped, so a third copy went out.
+  assert(dropped >= 3);
   stopReceiver.abort();
   const result = await received;
   assertEquals(result, completed);
@@ -498,7 +499,7 @@ Deno.test("a source that delivers each code twice counts fresh once per symbol",
   assertEquals(qr.stats.heard, qr.stats.fresh * 2);
 });
 
-Deno.test("a QR-only transfer whose DONE is lost gets DONE again after silence, then finishes", async () => {
+Deno.test("a QR-only transfer whose first DONE copy is lost still stops the sender", async () => {
   const items = testItems();
   const bundle = await encodeBundle(items);
   let dropped = 0;
@@ -507,15 +508,14 @@ Deno.test("a QR-only transfer whose DONE is lost gets DONE again after silence, 
     drop: (bytes) => isDone(bytes) && dropped++ === 0,
   });
   const display = new Display({ seed: 10, loss: 0.3 });
-  const dones: number[] = [];
-  const start = Date.now();
+  let dones = 0;
 
   const received = receiveBundle({
     sound: air.party(),
     camera: [qrDecoder(display)],
     silenceMs: SILENCE_MS,
     signal: new AbortController().signal,
-    onDone: () => dones.push(Date.now() - start),
+    onDone: () => dones++,
   });
   const sent = await sendBundle(bundle, {
     listen: air.party(),
@@ -528,9 +528,37 @@ Deno.test("a QR-only transfer whose DONE is lost gets DONE again after silence, 
 
   assertEquals(sent, "done");
   assertEquals((await received)?.items, items);
-  assertEquals(dones.length, 2);
-  assert(dones[1] - dones[0] >= SILENCE_MS);
-  assert(Date.now() - start - dones[1] >= SILENCE_MS);
+  assertEquals(dones, 1);
+});
+
+Deno.test("QR codes after DONE do not re-send it: the receiver finishes on sound silence", async () => {
+  const items = testItems();
+  const bundle = await encodeBundle(items);
+  const air = new Air({ seed: 10, drop: isDone });
+  const display = new Display({ seed: 10, loss: 0.3 });
+  const stopSender = new AbortController();
+  let dones = 0;
+
+  const received = receiveBundle({
+    sound: air.party(),
+    camera: [qrDecoder(display)],
+    silenceMs: SILENCE_MS,
+    signal: new AbortController().signal,
+    onDone: () => dones++,
+  });
+  const sent = sendBundle(bundle, {
+    listen: air.party(),
+    camera: {
+      encoder: qrEncoder(display),
+      rate: { packetsPerCode: 4, fps: 50 },
+    },
+    signal: stopSender.signal,
+  });
+
+  assertEquals((await received)?.items, items);
+  assertEquals(dones, 1);
+  stopSender.abort();
+  assertEquals(await sent, "stopped");
 });
 
 Deno.test("a QR receiver acks the blocks of dropped codes and the sender resends them", async () => {
@@ -1099,7 +1127,7 @@ Deno.test("a share-only camera codec's acks carry its share and no runs, and the
   );
 });
 
-Deno.test("a share-only camera transfer whose DONE is lost gets DONE again after silence", async () => {
+Deno.test("a share-only camera transfer whose first DONE copy is lost still stops the sender", async () => {
   const items = testItems();
   const bundle = await encodeBundle(items);
   let dropped = 0;
@@ -1126,6 +1154,5 @@ Deno.test("a share-only camera transfer whose DONE is lost gets DONE again after
 
   assertEquals(sent, "done");
   assertEquals((await received)?.items, items);
-  assertEquals(dones.length, 2);
-  assert(dones[1] - dones[0] >= SILENCE_MS);
+  assertEquals(dones.length, 1);
 });

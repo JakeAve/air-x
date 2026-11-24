@@ -138,6 +138,9 @@ The protocol layer. Spec: the main checkout's
   land at once and `raptor.ts`'s `Solver` runs once K symbols are in. Returns
   the zero-padded bundle.
 - `abort.ts` — `sleep` and `aborted` on an `AbortSignal`.
+- `library.ts` — pure logic for the on-device library: `hashBytes`, `merge`
+  (dedupe by hash, events oldest first), `evictions` under `LIBRARY_CAP`, and
+  `title`.
 - `channel.ts` — `PacketSource` (`onPacket`), `PacketChannel` (adds
   `send(packets, signal)`), `PacketDisplay` (`show`, `clear`).
 - `receiver.ts` — `Receiver`: one decoder per interleaved transfer, evicts stale

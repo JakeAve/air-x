@@ -41,7 +41,8 @@ export function merge(
   return {
     hash: asset.hash,
     name: asset.name,
-    type: asset.type,
+    // A reused blob keeps its MIME, so the type must match it.
+    type: existing?.type ?? asset.type,
     size: existing?.size ?? asset.bytes.length,
     blob: existing?.blob ??
       new Blob([asset.bytes as Uint8Array<ArrayBuffer>], { type: asset.type }),

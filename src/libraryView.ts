@@ -73,6 +73,8 @@ const isText = (item: LibraryItem) =>
 // ponytail: a title and the row's first words come from the first 4 KB, not the whole text.
 const PEEK_BYTES = 4096;
 
+const PREVIEW_BYTES = 64 * 1024;
+
 async function peek(item: LibraryItem): Promise<Uint8Array> {
   return isText(item)
     ? new Uint8Array(await item.blob.slice(0, PEEK_BYTES).arrayBuffer())
@@ -203,6 +205,7 @@ export async function renderLibrary(): Promise<void> {
 $("library-undo-button").addEventListener("click", async () => {
   const item = held;
   held = undefined;
+  // ponytail: an undo can briefly overshoot LIBRARY_CAP; the next save evicts.
   if (item) await putItem(item);
   await renderLibrary();
 });
@@ -295,7 +298,9 @@ function eventRow(e: LibraryEvent): [string, string] {
 export async function renderItemScreen(hash: string): Promise<void> {
   const gen = generation;
   const item = await getItem(hash);
-  const text = item && isText(item) ? await item.blob.text() : "";
+  const text = item && isText(item)
+    ? await item.blob.slice(0, PREVIEW_BYTES).text()
+    : "";
   if (gen !== generation) return;
   if (!item) {
     location.replace("#library");
@@ -303,6 +308,9 @@ export async function renderItemScreen(hash: string): Promise<void> {
   }
   revoke();
   $("item-preview").replaceChildren(preview(item, text));
+  if (isText(item) && item.size > PREVIEW_BYTES) {
+    $("item-preview").append(el("p", "muted", "Showing the first 64 KB"));
+  }
 
   const events = [...item.events].reverse().map(eventRow);
   const meta: HTMLElement[] = [facts(events.slice(0, 3))];
@@ -341,7 +349,12 @@ export async function renderItemScreen(hash: string): Promise<void> {
   save.href = objectUrl(item.blob);
   save.download = item.name;
   $<HTMLButtonElement>("item-delete").onclick = async () => {
-    held = await removeItem(hash);
+    try {
+      held = await removeItem(hash);
+    } catch (err) {
+      console.error("library: delete failed", err);
+      return;
+    }
     keepHeld = true;
     location.hash = "#library";
   };

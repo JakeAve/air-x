@@ -54,9 +54,10 @@ export async function record(
   event: LibraryEvent,
 ): Promise<void> {
   // Hash first: a transaction auto-commits across awaits on non-IDB promises.
-  const assets = await Promise.all(
+  const hashed = await Promise.all(
     items.map(async (i) => ({ ...i, hash: await hashBytes(i.bytes) })),
   );
+  const assets = [...new Map(hashed.map((a) => [a.hash, a])).values()];
   const { tx, items: os } = await store("readwrite");
   const finished = done(tx);
   const saved = new Map<string, number>();
@@ -74,7 +75,10 @@ export async function record(
   await finished;
   if (!persisted) {
     persisted = true;
-    console.log("library: persist", await navigator.storage?.persist?.());
+    navigator.storage?.persist?.().then(
+      (result) => console.log("library: persist", result),
+      (err) => console.error("library: persist", err),
+    );
   }
 }
 

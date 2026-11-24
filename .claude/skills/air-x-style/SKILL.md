@@ -139,10 +139,12 @@ The page is one document with one `<section class="screen">` per step, ids
 Changing screens aborts whatever the old one was running. Every screen after
 home opens with the strip (`.strip`: one `.app` link, `‹ Air X`, to `#home` on
 the left; the chevron is inline SVG in solid `--accent`) and an `h1`. Home has
-no strip: its `air x` wordmark already names the app. A step that runs a
-transfer keeps its form in a `*-form` div and its live view in a `*-run` div;
-the button below both flips label and `.primary`, and the title moves through
-present participle and past tense (`send`, `sending`, `sent`).
+no strip: its `air x` wordmark already names the app. The item screen
+(`#library/<hash>`) has the strip but no `h1`: its preview stands in for the
+title. A step that runs a transfer keeps its form in a `*-form` div and its live
+view in a `*-run` div; the button below both flips label and `.primary`, and the
+title moves through present participle and past tense (`send`, `sending`,
+`sent`).
 
 Motion: each direct child of a shown `.screen` swings in from its left edge
 (`@keyframes enter`, staggered by `nth-child`), so a screen change or a form/run

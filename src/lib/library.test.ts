@@ -52,6 +52,23 @@ Deno.test("received then sent is one item, events oldest first, existing untouch
   assertEquals(b.blob, a.blob);
 });
 
+Deno.test("a reused blob keeps its type, only the name updates", () => {
+  const bytes = enc.encode("x");
+  const a = merge(
+    undefined,
+    { hash: "h", name: "a.txt", type: "text/plain", bytes },
+    ev(1),
+  );
+  const b = merge(
+    a,
+    { hash: "h", name: "b.bin", type: "application/octet-stream", bytes },
+    ev(2),
+  );
+  assertEquals(b.name, "b.bin");
+  assertEquals(b.type, "text/plain");
+  assertEquals(b.blob.type, "text/plain");
+});
+
 Deno.test("evictions drop oldest first, never keep, stop under cap", () => {
   const items = [
     { hash: "a", size: 10, last: 1 },

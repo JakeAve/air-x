@@ -784,6 +784,8 @@ listenButton.addEventListener("click", async () => {
       }`,
     );
     let shown: number | undefined;
+    // When each transfer was first seen, so idle waiting is not transfer time.
+    const firstSeen = new Map<number, number>();
     // ponytail: every codec decodes the one camera; fan-out comes with a second codec.
     decoders = scanningQr ? Object.values(codecs).map((c) => c.decoder()) : [];
     let soundStats = { heard: 0, rejected: 0 };
@@ -818,6 +820,11 @@ listenButton.addEventListener("click", async () => {
       signal: controller.signal,
       onProgress: ({ sound: heard, transfers }) => {
         soundStats = heard;
+        for (const { transferId } of transfers) {
+          if (!firstSeen.has(transferId)) {
+            firstSeen.set(transferId, performance.now());
+          }
+        }
         const t = transfers.reduce(
           (best, t) => t.progress > best.progress ? t : best,
           transfers[0],
@@ -866,7 +873,8 @@ listenButton.addEventListener("click", async () => {
           direction: "received",
           at: Date.now(),
           via: via === "sound" ? "sound" : "qr",
-          ms: performance.now() - start,
+          // A one-packet transfer can complete before any progress.
+          ms: performance.now() - (firstSeen.get(transferId) ?? start),
         }).then((ok) => {
           savedLine.textContent = ok
             ? "Saved to library"

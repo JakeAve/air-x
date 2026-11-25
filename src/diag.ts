@@ -647,6 +647,7 @@ sendButton.addEventListener("click", async () => {
   } finally {
     stopTicker?.();
     running = undefined;
+    applyUpdate();
     cameraFrame.hidden = true;
     sendRun.hidden = result !== "done";
     sendForm.hidden = false;
@@ -991,6 +992,7 @@ listenButton.addEventListener("click", async () => {
     stopTicker?.();
     clearInterval(scanReport);
     running = undefined;
+    applyUpdate();
     for (const d of decoders) d.close();
     scanningQr = false;
     closeCamera();
@@ -1002,5 +1004,42 @@ listenButton.addEventListener("click", async () => {
   }
 });
 
-// Installs the app for offline use; the page works without it.
-navigator.serviceWorker?.register("./sw.js");
+// Installs the app for offline use; the page works without it. A new build
+// installs and waits; once no transfer is running it takes over and the page
+// reloads into it. A home-screen app resumed on iOS is not a navigation, so it
+// would never check for one on its own.
+const sw = navigator.serviceWorker;
+let registration: ServiceWorkerRegistration | undefined;
+// Set once this page asks a waiting build to take over. A takeover it did not
+// ask for is a first install claiming the page, which runs the newest build.
+let updating = false;
+
+function applyUpdate() {
+  const waiting = registration?.waiting;
+  if (running || !waiting) return;
+  updating = true;
+  waiting.postMessage("skip-waiting");
+}
+
+if (sw) {
+  sw.addEventListener("controllerchange", () => {
+    if (updating) location.reload();
+  });
+  sw.register("./sw.js").then((reg) => {
+    registration = reg;
+    const whenInstalled = (worker: ServiceWorker | null) =>
+      worker?.addEventListener("statechange", () => {
+        if (worker.state === "installed") applyUpdate();
+      });
+    whenInstalled(reg.installing);
+    reg.addEventListener("updatefound", () => whenInstalled(reg.installing));
+    applyUpdate();
+    const check = () => {
+      if (document.visibilityState === "visible") reg.update().catch(() => {});
+    };
+    addEventListener("visibilitychange", check);
+    addEventListener("pageshow", check);
+    // ponytail: visibilitychange may not fire on an iOS resume; the interval backs it up.
+    setInterval(check, 30 * 60_000);
+  });
+}

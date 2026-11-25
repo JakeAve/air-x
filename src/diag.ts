@@ -110,6 +110,13 @@ function about(s: number): string {
   return `about ${(s / 3600).toFixed(1)} h`;
 }
 
+/**
+ * Codes a cimbar send shows with no ack before it goes by QR instead: about
+ * 17 s at the 6 codes per second it starts at. A receiver reading cimbar acks
+ * after about 7 distinct codes, or finishes first.
+ */
+const CIMBAR_FALLBACK_AFTER = 100;
+
 function percent(share: number | undefined): string {
   return share === undefined ? "–" : `${Math.round(share * 100)}%`;
 }
@@ -307,7 +314,7 @@ function rates() {
     listenEvery,
     windowMs,
     cameraRate: cameraCodec() === "cimbar"
-      ? { fps: positive(cimbarFpsInput, 15) }
+      ? { fps: positive(cimbarFpsInput, 6) }
       : { packetsPerCode, fps },
     soundPerSecond,
   };
@@ -516,8 +523,9 @@ sendButton.addEventListener("click", async () => {
         ms: performance.now() - start,
       });
     };
-    // A cimbar send that no receiver acks within SILENT_AFTER codes goes again
-    // by QR code, as a new transfer: every receiver reads QR, not all cimbar.
+    // A cimbar send that no receiver acks within CIMBAR_FALLBACK_AFTER codes
+    // goes again by QR code, as a new transfer: every receiver reads QR, not
+    // all cimbar.
     let leg = codec;
     let legRate = cameraRate;
     for (;;) {
@@ -564,7 +572,7 @@ sendButton.addEventListener("click", async () => {
         }) => {
           if (
             via === "camera" && leg === "cimbar" && !acked &&
-            cameraFrames >= SILENT_AFTER
+            cameraFrames >= CIMBAR_FALLBACK_AFTER
           ) fallback.abort();
           if (transfer === undefined) {
             transfer = transferId;
@@ -611,7 +619,7 @@ sendButton.addEventListener("click", async () => {
       });
       if (!fallback.signal.aborted || controller.signal.aborted) break;
       log(
-        `send: no ack after ${SILENT_AFTER} cimbar codes, sending by QR code`,
+        `send: no ack after ${CIMBAR_FALLBACK_AFTER} cimbar codes, sending by QR code`,
       );
       leg = "qr";
       legRate = rateNow = qrRate;

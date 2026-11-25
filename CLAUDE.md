@@ -79,10 +79,12 @@ fresh port is a clean origin. README, "Testing on phones", has the rest.
   screen flips between Send/Listen and Stop. A camera send shows the code
   full-window with its own Stop button. Tuning inputs sit under Advanced,
   including a camera codec select (Cimbar, the default, or QR code; both adapt
-  their rate). A cimbar send that hears no ack in `SILENT_AFTER` codes starts
-  over as a QR send with a new transfer id, since every receiver reads QR.
-  Defaults: 4 packets per code, 5 fps, ECC medium, adapt rate on; camera on,
-  scan max edge 1280, ack every 80 symbols (0 never acks); silence 12 s.
+  their rate). Cimbar starts at 6 codes per second: at 15 an iPhone in room
+  light caught most codes blended with the next, which cimbar rejects. A cimbar
+  send that hears no ack in `CIMBAR_FALLBACK_AFTER` (100) codes starts over as a
+  QR send with a new transfer id, since every receiver reads QR. Defaults: 4
+  packets per code, 5 fps, ECC medium, adapt rate on; camera on, scan max edge
+  1280, ack every 80 symbols (0 never acks); silence 12 s.
 - `src/adapters/` — the only browser-API code besides the entries: `pageLink.ts`
   (`openDevices`: one codec worker shared by both transports; `cameraCodecs`:
   the registry of camera codecs by name, each an `encoder` and a `decoder()`

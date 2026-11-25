@@ -53,7 +53,8 @@ export class QrTransport implements PacketSource, PacketDisplay {
 
   async #open(): Promise<void> {
     try {
-      const camera = await Camera.open(this.#video, this.facing);
+      // 4K: the one camera feeds every codec, and cimbar reads 4K best.
+      const camera = await Camera.open(this.#video, this.facing, true);
       if (!this.#wantsCamera || this.#camera) {
         camera.close();
         return;

@@ -1,6 +1,7 @@
 import { CodecWorker } from "./codecWorker.ts";
 import { SoundTransport } from "./soundTransport.ts";
 import { QrTransport } from "./qrTransport.ts";
+import { cimbarDecoder, cimbarEncoder, cimbarSeconds } from "./cimbar.ts";
 import { type CameraEncoder, qrEncoder, qrSeconds } from "@/lib/cameraCodec.ts";
 import type { CameraRate } from "@/lib/rate.ts";
 import type { PacketDisplay, PacketSource } from "@/lib/channel.ts";
@@ -17,15 +18,24 @@ export interface CameraCodec {
 
 /** Each camera codec's send estimate, usable before any device is open. */
 export const cameraSeconds: Record<
-  "qr",
+  CameraCodecName,
   (bytes: number, rate: CameraRate) => number
-> = { qr: qrSeconds };
+> = { cimbar: cimbarSeconds, qr: qrSeconds };
+
+/** The codec select's options, first the default. */
+export type CameraCodecName = "cimbar" | "qr";
 
 /** Every camera codec the page offers, by the name the codec select uses. */
 export function cameraCodecs(
   qr: PacketSource & PacketDisplay,
-): Record<"qr", CameraCodec> {
+  cimbarCanvas: HTMLCanvasElement,
+  video: HTMLVideoElement,
+): Record<CameraCodecName, CameraCodec> {
   return {
+    cimbar: {
+      encoder: cimbarEncoder(cimbarCanvas),
+      decoder: () => cimbarDecoder(cimbarCanvas, video),
+    },
     qr: {
       encoder: qrEncoder(qr),
       decoder: () => packetDecoder(qr, { name: "qr", countFrom: "first" }),
@@ -36,6 +46,7 @@ export function cameraCodecs(
 /** Builds one worker shared by both transports. Call from a user gesture so iOS lets the audio context run. */
 export async function openDevices(
   canvas: HTMLCanvasElement,
+  cimbarCanvas: HTMLCanvasElement,
   video: HTMLVideoElement,
 ): Promise<{
   sound: SoundTransport;
@@ -53,7 +64,7 @@ export async function openDevices(
   return {
     sound,
     qr,
-    codecs: cameraCodecs(qr),
+    codecs: cameraCodecs(qr, cimbarCanvas, video),
     sampleRate: context.sampleRate,
   };
 }

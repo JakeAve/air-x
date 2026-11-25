@@ -22,18 +22,23 @@ export class Camera {
   /**
    * Opens a camera into `video`. A front camera is previewed mirrored, the
    * way people expect to see themselves; the decoder gets the raw frames.
-   * Must be called from a user gesture on iOS.
+   * `uhd` asks for 4K and continuous focus: dense codes such as cimbar read
+   * in half the time, while QR scans downscale to `scanMaxEdge` and gain
+   * nothing. Must be called from a user gesture on iOS.
    */
   static async open(
     video: HTMLVideoElement,
     facing: Facing = "environment",
+    uhd = false,
   ): Promise<Camera> {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: facing,
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-      },
+        width: { ideal: uhd ? 3840 : 1920 },
+        height: { ideal: uhd ? 2160 : 1080 },
+        // Not in TypeScript's DOM types; browsers that lack it ignore it.
+        ...(uhd ? { focusMode: "continuous" } : {}),
+      } as MediaTrackConstraints,
       audio: false,
     });
     video.srcObject = stream;

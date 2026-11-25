@@ -1156,3 +1156,33 @@ Deno.test("a share-only camera transfer whose first DONE copy is lost still stop
   assertEquals((await received)?.items, items);
   assertEquals(dones.length, 1);
 });
+
+Deno.test("a camera encoder's idBits narrows the transfer id it is given", async () => {
+  const ids: number[] = [];
+  const encoder: CameraEncoder = {
+    name: "seven-bit",
+    idBits: 7,
+    start: (_bundle, transferId) => {
+      ids.push(transferId);
+      return {
+        setRate: () => {},
+        resend: () => 0,
+        fresh: 0,
+        done: Promise.resolve(),
+      };
+    },
+    seconds: () => 0,
+  };
+  const bundle = await encodeBundle(testItems());
+  for (let i = 0; i < 64; i++) {
+    const stop = new AbortController();
+    stop.abort();
+    await sendBundle(bundle, {
+      listen: new Air({ seed: i }).party(),
+      camera: { encoder, rate: { fps: 1 } },
+      signal: stop.signal,
+    });
+  }
+  assertEquals(ids.length, 64);
+  assertEquals(ids.every((id) => id < 128), true);
+});

@@ -3,8 +3,11 @@
 Air exchange: send contacts, text, images, and files to the person right next to
 you, with no server, no account, and no network. Two devices pass data directly
 by sound ([ggwave](https://github.com/ggerganov/ggwave) or
-[libquiet](https://github.com/quiet/quiet-js)) or by QR code. The two channels
-are interchangeable, so a noisy room or a broken camera never blocks a transfer.
+[libquiet](https://github.com/quiet/quiet-js)) or by camera, reading codes off
+the other screen: [libcimbar](https://github.com/sz3/libcimbar) color codes
+(MPL-2.0, vendored unmodified in `static/cimbar/`) by default, or QR codes. The
+two channels are interchangeable, so a noisy room or a broken camera never
+blocks a transfer.
 
 A sibling of [airgap](https://github.com/JakeAve/airgap), which uses the same
 transports for two-player games. Built with Deno, TypeScript, and plain HTML and
@@ -78,9 +81,11 @@ The root certificate is public; its key never leaves `mkcert -CAROOT`.
 
 Then open the printed address on two devices. Tap Send on one, type text or pick
 files, and press Send; tap Receive on the other and press Receive. Send by picks
-QR or sound (it defaults to sound for bundles up to 2 KB, else QR) and the line
-under it estimates how long each would take. Tuning inputs live under Advanced
-on each screen, and ‹ Air X at the top left returns to the first screen.
+sound or camera (it defaults to sound for bundles up to 2 KB, else camera) and
+the line under it estimates how long each would take. The camera sends cimbar
+codes unless Advanced picks QR code; the receiver reads both, so it has no
+choice to make. Tuning inputs live under Advanced on each screen, and ‹ Air X at
+the top left returns to the first screen.
 
 ### Reading a phone's log
 
@@ -111,21 +116,22 @@ This is added by the dev server as it serves each page. None of it is in
   another port, which is a clean origin, with `PORT=8450 deno task dev`.
 - **The port is taken.** Same: `PORT=8450 deno task dev`.
 
-### QR between two phones
+### Camera between two phones
 
-1. On the receiver, leave Scan QR with camera on and press Receive. The rear
+1. On the receiver, leave Scan codes with camera on and press Receive. The rear
    camera opens; use Flip camera under the preview if it shows your face.
 2. On the sender, turn screen brightness all the way up, type something, and
    press Send. The code fills the screen.
 3. Point the receiver's rear camera at the sender's screen, close enough that
    the code fills most of the preview, and hold steady.
-4. The receiver shows blocks resolved, and under the preview the codes found per
-   frames scanned and new packets per second.
+4. The receiver fills its grid as the transfer comes in: one tile per block for
+   QR, a share of the tiles for cimbar.
 
 The receiver chirps an ack every "ack every" symbols (under its Advanced; 0
 turns acks off) saying how much it heard and, late in the transfer, which blocks
-it still misses. With "Adapt rate to acks" on under the sender's Advanced, the
-sender uses those to raise or lower packets per code and codes per second by
-itself, and logs each change as `send: rate now ...`. Turn it off to hold the
-rate you set. DONE and acks always go back by sound, so keep both phones' volume
-up even when sending by QR.
+it still misses; a cimbar ack names no blocks, since its own fountain code needs
+no particular one. With "Adapt rate to acks" on (QR code only) under the
+sender's Advanced, the sender uses those to raise or lower packets per code and
+codes per second by itself, and logs each change as `send: rate now ...`. Turn
+it off to hold the rate you set. DONE and acks always go back by sound, so keep
+both phones' volume up even when sending by camera.

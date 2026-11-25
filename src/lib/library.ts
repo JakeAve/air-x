@@ -4,7 +4,7 @@
 export type LibraryEvent = {
   direction: "sent" | "received";
   at: number;
-  via: "sound" | "qr";
+  via: "sound" | "qr" | "cimbar";
   ms: number;
 };
 

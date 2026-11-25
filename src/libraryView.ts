@@ -110,6 +110,11 @@ function day(at: number) {
   return days === 0 ? "Today" : days === 1 ? "Yesterday" : date(at);
 }
 
+const VIA: Record<LibraryEvent["via"], string> = {
+  sound: "Sound",
+  qr: "QR code",
+  cimbar: "Cimbar",
+};
 const verb = (e: LibraryEvent) => e.direction === "sent" ? "Sent" : "Received";
 
 function initials(name: string) {
@@ -289,9 +294,7 @@ function preview(item: LibraryItem, text: string): HTMLElement {
 function eventRow(e: LibraryEvent): [string, string] {
   return [
     verb(e),
-    `${day(e.at)}, ${time(e.at)} · ${e.via === "qr" ? "QR code" : "Sound"} · ${
-      seconds(e.ms)
-    }`,
+    `${day(e.at)}, ${time(e.at)} · ${VIA[e.via]} · ${seconds(e.ms)}`,
   ];
 }
 

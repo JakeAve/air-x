@@ -29,7 +29,7 @@ export type CameraCodecName = "cimbar" | "qr";
 export function cameraCodecs(
   qr: PacketSource & PacketDisplay,
   cimbarCanvas: HTMLCanvasElement,
-  video: HTMLVideoElement,
+  video: () => HTMLVideoElement,
 ): Record<CameraCodecName, CameraCodec> {
   return {
     cimbar: {
@@ -64,7 +64,7 @@ export async function openDevices(
   return {
     sound,
     qr,
-    codecs: cameraCodecs(qr, cimbarCanvas, video),
+    codecs: cameraCodecs(qr, cimbarCanvas, () => qr.video),
     sampleRate: context.sampleRate,
   };
 }

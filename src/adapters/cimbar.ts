@@ -196,12 +196,13 @@ type WorkerReply = {
 };
 
 /**
- * Reads cimbar codes from `video` (opened by the camera's owner) with
+ * Reads cimbar codes from `video()` (opened by the camera's owner, which
+ * swaps the element on every open) with
  * libcimbar's own worker pool, until closed.
  */
 export function cimbarDecoder(
   canvas: HTMLCanvasElement,
-  video: HTMLVideoElement,
+  video: () => HTMLVideoElement,
 ): TransferDecoder & { readonly stats: CimbarStats } {
   const stats: CimbarStats = {
     heard: 0,
@@ -322,11 +323,15 @@ export function cimbarDecoder(
       ]);
       workers.forEach((_, i) => listen(i));
       while (!stop.signal.aborted) {
-        await videoFrame(video);
+        // Closing the camera leaves this callback pending until the next
+        // stream's first frame, so close() must not wait on it.
+        const v = video();
+        await Promise.race([videoFrame(v), aborted(stop.signal)]);
+        if (stop.signal.aborted) break;
         // One frame per worker in flight; a stale frame is worth less than a fresh one.
-        if (inFlight >= workers.length || !video.videoWidth) continue;
+        if (inFlight >= workers.length || !v.videoWidth) continue;
         try {
-          const frame = await grab(video);
+          const frame = await grab(v);
           stats.frames++;
           inFlight++;
           const i = next++ % workers.length;

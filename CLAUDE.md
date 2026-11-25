@@ -279,6 +279,10 @@ Wire facts (multi-byte fields big-endian):
 - The camera, like the mic, is opened by `watch()` and left rolling for a leg;
   the diag page closes it as soon as a transfer completes (DONE goes on by
   sound) or the receive ends.
+- Each camera open plays into a fresh clone of `#preview`: iOS Safari sometimes
+  draws a new stream in a reused `<video>` at a stale, smaller size, ignoring
+  `object-fit`, while the element's box stays full-window. So nothing holds the
+  element: the page looks it up by id and decoders take `() => qr.video`.
 - It is a PWA: `static/manifest.webmanifest` plus `static/sw.js`, a plain-JS
   service worker that precaches every asset (cache-first, network fallback) so
   the app opens offline. Its `ASSETS` list is by hand, cimbar's dated files

@@ -33,6 +33,8 @@ addresses to open, serves mkcert's root certificate at `/rootCA.pem` for phones
 to install, and prints every device's page log, errors, and requests tagged with
 the device's address (injected at serve time, nothing in `dist/`). `/sw.js` is
 replaced by a worker that clears caches, so dev never serves a stale build.
+`REAL_SW=1` serves the real one instead, to test how a new build reaches a
+device.
 
 **Local development is always tested on a phone.** Mic, camera, speaker, and
 touch only behave for real there, so a desktop browser is never the check. For
@@ -283,9 +285,12 @@ Wire facts (multi-byte fields big-endian):
   service worker that precaches every asset (cache-first, network fallback) so
   the app opens offline. Its `ASSETS` list is by hand, cimbar's dated files
   included; `build.ts` fails if one is missing from `dist/`. `src/diag.ts`
-  registers it. Airgap's cache gotcha applies: a change only reaches a device on
-  its second open after the deploy, and the build's hash stamp is what makes it
-  reach at all. Never edit `dist/sw.js` by hand.
+  registers it and checks for a new build whenever the page comes to the front
+  and every 30 minutes. A new build installs and waits; once no transfer is
+  running, the page tells it to take over and reloads into it, so an update
+  never mixes an old page with new workers. The build's hash stamp is what makes
+  a new build at all. Its caches are named `air-x-`, and only those are ever
+  deleted: airgap shares the Pages origin. Never edit `dist/sw.js` by hand.
 
 ## Workflow
 

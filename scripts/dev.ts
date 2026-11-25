@@ -16,6 +16,7 @@
 // The real service worker is cache-first, so a device that ever cached this
 // origin would keep running an old build. /sw.js is served as DEV_SW instead:
 // it drops every cache, unregisters, and reloads pages that were cached.
+// REAL_SW=1 serves the real one, to test how a new build reaches a device.
 import { serveDir } from "@std/http";
 import { dirname, join } from "@std/path";
 import { build } from "./build.ts";
@@ -80,7 +81,7 @@ async function handle(req: Request, info: Deno.ServeHandlerInfo) {
       headers: { "content-type": "application/x-x509-ca-cert" },
     });
   }
-  if (pathname === "/sw.js") {
+  if (pathname === "/sw.js" && !Deno.env.get("REAL_SW")) {
     return new Response(DEV_SW, {
       headers: {
         "content-type": "text/javascript",

@@ -59,6 +59,13 @@ export const LADDER_DEFAULTS: LadderOptions = {
   retryAfter: 4,
 };
 
+/** Cimbar's ladder, fps only (its frames hold a fixed 7.5 KB): guesses, as above. */
+export const CIMBAR_LADDER: CameraRate[] = [6, 8, 10, 12, 15, 20].map((
+  fps,
+) => ({
+  fps,
+}));
+
 const perSecond = (rate: CameraRate) => (rate.packetsPerCode ?? 1) * rate.fps;
 
 /**

@@ -22,7 +22,13 @@ import { OVERHEAD } from "@/lib/cameraCodec.ts";
 import { blockCount } from "@/lib/fountain/symbols.ts";
 import { receiveBundle, sendBundle } from "@/lib/session.ts";
 import { PACKET_SECONDS, SOUND_PACKET_BYTES } from "@/lib/protocol.ts";
-import { type CameraRate, ladderPolicy, SILENT_AFTER } from "@/lib/rate.ts";
+import { anySignal } from "@/lib/abort.ts";
+import {
+  type CameraRate,
+  CIMBAR_LADDER,
+  ladderPolicy,
+  SILENT_AFTER,
+} from "@/lib/rate.ts";
 import type { QrEcc } from "@/lib/qr/qrEncoder.ts";
 import type { SoundProtocol } from "@/lib/sound/ggwave.ts";
 
@@ -440,7 +446,8 @@ sendButton.addEventListener("click", async () => {
     sound.protocol = protocol();
     qr.ecc = eccSelect.value as QrEcc;
     const bundle = await encodeBundle(items);
-    const { listenEvery, windowMs, cameraRate, soundPerSecond } = rates();
+    const { listenEvery, windowMs, cameraRate, soundPerSecond, ...qrRate } =
+      rates();
     const codec = cameraCodec();
     const encoder = codecs[codec].encoder;
     const n = Math.ceil(
@@ -481,7 +488,9 @@ sendButton.addEventListener("click", async () => {
             ? `, camera QR code ${cameraRate.packetsPerCode}/code @ ${cameraRate.fps} fps ${qr.ecc}${
               adaptRateToggle.checked ? ", adaptive" : ""
             }`
-            : `, camera ${codec} @ ${cameraRate.fps} fps`
+            : `, camera ${codec} @ ${cameraRate.fps} fps${
+              adaptRateToggle.checked ? ", adaptive" : ""
+            }`
           : `, sound ${sound.protocol} listenEvery ${listenEvery} window ${windowMs} ms`),
     );
     let transfer: number | undefined;
@@ -507,68 +516,109 @@ sendButton.addEventListener("click", async () => {
         ms: performance.now() - start,
       });
     };
-    result = await sendBundle(bundle, {
-      listen: sound,
-      sound: by === "sound"
-        ? { channel: sound, listenEvery, windowMs }
-        : undefined,
-      camera: by === "camera"
-        ? {
-          encoder,
-          rate: cameraRate,
-          // Only QR's acks carry a share yet, so only QR adapts.
-          adapt: adaptRateToggle.checked && codec === "qr"
-            ? { policy: ladderPolicy(), silentAfter: SILENT_AFTER }
-            : undefined,
-        }
-        : undefined,
-      signal: controller.signal,
-      onAck: (runs, share) =>
-        log(
-          `send: ack heard: ${
-            runs.reduce((sum, r) => sum + r.length, 0)
-          } blocks in ${runs.length} runs, heard ${percent(share)}`,
-        ),
-      onProgress: (
-        { transferId, k, soundSent, via, symbolIds, rate, share, freshBytes },
-      ) => {
-        if (transfer === undefined) {
-          transfer = transferId;
+    // A cimbar send that no receiver acks within SILENT_AFTER codes goes again
+    // by QR code, as a new transfer: every receiver reads QR, not all cimbar.
+    let leg = codec;
+    let legRate = cameraRate;
+    for (;;) {
+      const fallback = new AbortController();
+      let acked = false;
+      result = await sendBundle(bundle, {
+        listen: sound,
+        sound: by === "sound"
+          ? { channel: sound, listenEvery, windowMs }
+          : undefined,
+        camera: by === "camera"
+          ? {
+            encoder: codecs[leg].encoder,
+            rate: legRate,
+            adapt: adaptRateToggle.checked
+              ? {
+                policy: ladderPolicy(
+                  leg === "cimbar" ? { ladder: CIMBAR_LADDER } : {},
+                ),
+                silentAfter: SILENT_AFTER,
+              }
+              : undefined,
+          }
+          : undefined,
+        signal: anySignal(controller.signal, fallback.signal),
+        onAck: (runs, share) => {
+          acked = true;
           log(
-            `send: transfer ${transferId}${k === undefined ? "" : `, k ${k}`}`,
+            `send: ack heard: ${
+              runs.reduce((sum, r) => sum + r.length, 0)
+            } blocks in ${runs.length} runs, heard ${percent(share)}`,
           );
-        }
-        if (freshBytes >= bundle.length) recordSent();
-        if (via === "camera") {
+        },
+        onProgress: ({
+          transferId,
+          k,
+          soundSent,
+          cameraFrames,
+          via,
+          symbolIds,
+          rate,
+          share,
+          freshBytes,
+        }) => {
           if (
-            rate &&
-            (rate.packetsPerCode !== rateNow.packetsPerCode ||
-              rate.fps !== rateNow.fps)
-          ) {
-            rateNow = rate;
-            log(`send: rate now ${rate.packetsPerCode}/code @ ${rate.fps} fps`);
+            via === "camera" && leg === "cimbar" && !acked &&
+            cameraFrames >= SILENT_AFTER
+          ) fallback.abort();
+          if (transfer === undefined) {
+            transfer = transferId;
+            log(
+              `send: transfer ${transferId}${
+                k === undefined ? "" : `, k ${k}`
+              }`,
+            );
           }
-          lastLine = line(share, freshBytes);
-          cameraLine.textContent = lastLine;
-          return;
-        }
-        for (const id of symbolIds) {
-          if (Math.floor(id / n) > pass) {
-            pass = Math.floor(id / n);
-            for (const cell of $("send-grid").children) {
-              (cell as HTMLElement).dataset.s = "0";
+          if (freshBytes >= bundle.length) recordSent();
+          if (via === "camera") {
+            if (
+              rate &&
+              (rate.packetsPerCode !== rateNow.packetsPerCode ||
+                rate.fps !== rateNow.fps)
+            ) {
+              rateNow = rate;
+              log(
+                `send: rate now ${
+                  rate.packetsPerCode ? `${rate.packetsPerCode}/code @ ` : ""
+                }${rate.fps} fps`,
+              );
             }
+            lastLine = line(share, freshBytes);
+            cameraLine.textContent = lastLine;
+            return;
           }
-          gridMark("send-grid", id % n, 3);
-        }
-        show(
-          "send-count",
-          pass
-            ? `${n} packets · pass ${pass + 1}`
-            : `${soundSent} of ${n} packets`,
-        );
-      },
-    });
+          for (const id of symbolIds) {
+            if (Math.floor(id / n) > pass) {
+              pass = Math.floor(id / n);
+              for (const cell of $("send-grid").children) {
+                (cell as HTMLElement).dataset.s = "0";
+              }
+            }
+            gridMark("send-grid", id % n, 3);
+          }
+          show(
+            "send-count",
+            pass
+              ? `${n} packets · pass ${pass + 1}`
+              : `${soundSent} of ${n} packets`,
+          );
+        },
+      });
+      if (!fallback.signal.aborted || controller.signal.aborted) break;
+      log(
+        `send: no ack after ${SILENT_AFTER} cimbar codes, sending by QR code`,
+      );
+      leg = "qr";
+      legRate = rateNow = qrRate;
+      transfer = undefined;
+      qrCanvas.hidden = false;
+      cimbarBox.hidden = true;
+    }
     const elapsed = seconds(performance.now() - start);
     log(
       result === "done"

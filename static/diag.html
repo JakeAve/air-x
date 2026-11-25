@@ -90,6 +90,10 @@
                   <option value="qr">QR code</option>
                 </select>
               </label>
+              <label class="switch">Adapt rate to acks
+                <input id="adapt-rate" type="checkbox" checked />
+                <span class="state"></span>
+              </label>
               <div class="stack" data-codec="cimbar">
                 <label>Codes per second
                   <input id="cimbar-fps" type="number" inputmode="decimal" min="1" step="1" value="15" />
@@ -111,10 +115,6 @@
                     <option value="quartile">Quartile</option>
                     <option value="high">High</option>
                   </select>
-                </label>
-                <label class="switch">Adapt rate to acks
-                  <input id="adapt-rate" type="checkbox" checked />
-                  <span class="state"></span>
                 </label>
               </div>
               <h2>Sound</h2>

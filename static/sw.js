@@ -11,6 +11,10 @@ const ASSETS = [
   "./fonts/open-sans.woff2",
   "./favicon.svg",
   "./manifest.webmanifest",
+  // Renamed with each libcimbar update; build.ts fails on a missing one.
+  "./cimbar/cimbar_js.2026-11-18T0531.js",
+  "./cimbar/cimbar_js.2026-11-18T0531.wasm",
+  "./cimbar/recv-worker.2026-11-18T0531.js",
 ];
 
 self.addEventListener("install", (event) => {

@@ -22,7 +22,12 @@ import {
   PacketType,
   type Run,
 } from "./packet.ts";
-import type { CameraRate, RateSample } from "./rate.ts";
+import {
+  type CameraRate,
+  CIMBAR_LADDER,
+  ladderPolicy,
+  type RateSample,
+} from "./rate.ts";
 import {
   type AckReport,
   packetDecoder,
@@ -1185,4 +1190,48 @@ Deno.test("a camera encoder's idBits narrows the transfer id it is given", async
   }
   assertEquals(ids.length, 64);
   assertEquals(ids.every((id) => id < 128), true);
+});
+
+Deno.test("an adaptive fps-only send climbs cimbar's ladder on clean acks and holds at the top", async () => {
+  const items = testItems();
+  const bundle = await encodeBundle(items);
+  const air = new Air({ seed: 23 });
+  const link = new ShareOnlyLink({ seed: 23, loss: 0, need: 40 });
+  const stopReceiver = new AbortController();
+  const ladder = ladderPolicy({ ladder: CIMBAR_LADDER });
+  const fps: number[] = [];
+
+  const received = receiveBundle({
+    sound: air.party(),
+    camera: [link.decoder()],
+    silenceMs: 60_000,
+    ackEvery: 4,
+    signal: stopReceiver.signal,
+  });
+  const sent = await sendBundle(bundle, {
+    listen: air.party(),
+    camera: {
+      encoder: link.encoder(),
+      rate: CIMBAR_LADDER[0],
+      adapt: {
+        silentAfter: 1_000,
+        policy: (sample) => {
+          fps.push(sample.rate.fps);
+          return ladder(sample);
+        },
+      },
+    },
+    signal: new AbortController().signal,
+  });
+
+  assertEquals(sent, "done");
+  stopReceiver.abort();
+  assertEquals((await received)?.items, items);
+  const top = CIMBAR_LADDER.at(-1)!.fps;
+  assertEquals(
+    fps.slice(0, CIMBAR_LADDER.length),
+    CIMBAR_LADDER.map((r) => r.fps),
+  );
+  assert(fps.length > CIMBAR_LADDER.length);
+  assert(fps.slice(CIMBAR_LADDER.length).every((f) => f === top));
 });

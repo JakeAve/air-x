@@ -3,11 +3,12 @@
 // its own fountain code (wirehair) and zstd, so the bundle goes in as one file
 // and comes out whole; our packets are not involved. A frame's header carries
 // the sender's 7-bit encode id, which is the transfer id, so acks and DONE
-// work as for any camera codec. Its acks name no blocks: wirehair needs only
-// enough of any of them.
+// work as for any camera codec. Its acks name no blocks (wirehair needs only
+// enough of any of them) but carry the share of frames read, from the block
+// ids in the frame headers, so the sender can adapt its codes per second.
 import { aborted } from "@/lib/abort.ts";
 import { type CameraEncoder, OVERHEAD } from "@/lib/cameraCodec.ts";
-import { cimbarHeader } from "@/lib/cimbarFrame.ts";
+import { cimbarHeader, CimbarTally } from "@/lib/cimbarFrame.ts";
 import { nv12ToRgba } from "@/lib/nv12.ts";
 import type { CameraRate } from "@/lib/rate.ts";
 import type {
@@ -194,14 +195,6 @@ type WorkerReply = {
   res?: string;
 };
 
-interface Tally {
-  /** The highest first-block id of a frame read. */
-  highest: number;
-  /** Distinct frames read. */
-  heard: number;
-  blocks: Set<number>;
-}
-
 /**
  * Reads cimbar codes from `video` (opened by the camera's owner) with
  * libcimbar's own worker pool, until closed.
@@ -223,7 +216,7 @@ export function cimbarDecoder(
   const completeListeners = new Set<
     (transferId: number, bundle: Uint8Array, unit?: TransferHeard) => void
   >();
-  const tallies = new Map<number, Tally>();
+  const tallies = new Map<number, CimbarTally>();
   const complete = new Set<number>();
   /** The transfer cimbar is assembling, and its share from cimbar's report. */
   let current: number | undefined;
@@ -261,16 +254,11 @@ export function cimbarDecoder(
       stats.heard++;
       const { encodeId: transferId, blockId } = cimbarHeader(data.buff);
       if (complete.has(transferId)) return;
-      const t = tallies.get(transferId) ??
-        { highest: -1, heard: 0, blocks: new Set() };
+      const t = tallies.get(transferId) ?? new CimbarTally();
       tallies.set(transferId, t);
-      const isNew = !t.blocks.has(blockId);
-      if (isNew) {
-        t.blocks.add(blockId);
-        t.heard++;
-        stats.fresh++;
-      }
-      t.highest = Math.max(t.highest, blockId);
+      // In chunks, so `ackEvery` counts cimbar's symbols, not whole frames.
+      const fresh = t.read(blockId);
+      if (fresh) stats.fresh++;
       current = transferId;
       m.HEAPU8.set(data.buff, sink);
       // The file id on completion, 0 short of it, -1 for a finished file; an int64, so a bigint in some builds.
@@ -286,7 +274,7 @@ export function cimbarDecoder(
       } catch { /* the report is prose until a stream starts */ }
       const heard: TransferHeard = {
         transferId,
-        fresh: isNew ? 1 : 0,
+        fresh,
         counting: true,
       };
       if (res > 0) {
@@ -371,10 +359,7 @@ export function cimbarDecoder(
     onComplete: (l) => listen(completeListeners, l),
     ack(transferId) {
       const t = tallies.get(transferId);
-      if (!t) return undefined;
-      // ponytail: no share, so a sender does not adapt cimbar's rate yet;
-      // it would need frames per block id, which cimbar does not report.
-      return { k: 0, highest: t.highest, heard: t.heard, runs: [] };
+      return t && { k: 0, ...t.ack(), runs: [] };
     },
     status: () =>
       current === undefined || complete.has(current)

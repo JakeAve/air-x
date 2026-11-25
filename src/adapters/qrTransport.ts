@@ -53,8 +53,13 @@ export class QrTransport implements PacketSource, PacketDisplay {
 
   async #open(): Promise<void> {
     try {
+      // A fresh element per stream: Safari can draw a stream in a reused
+      // <video> at a stale, smaller size, ignoring object-fit.
+      const fresh = this.#video.cloneNode() as HTMLVideoElement;
+      this.#video.replaceWith(fresh);
+      this.#video = fresh;
       // 4K: the one camera feeds every codec, and cimbar reads 4K best.
-      const camera = await Camera.open(this.#video, this.facing, true);
+      const camera = await Camera.open(fresh, this.facing, true);
       if (!this.#wantsCamera || this.#camera) {
         camera.close();
         return;
@@ -94,6 +99,11 @@ export class QrTransport implements PacketSource, PacketDisplay {
     if (!this.watching) return;
     this.stopWatching();
     await this.watch();
+  }
+
+  /** The element the camera plays into; replaced on every open. */
+  get video(): HTMLVideoElement {
+    return this.#video;
   }
 
   get watching(): boolean {

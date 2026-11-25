@@ -73,7 +73,8 @@ const receiveRun = $<HTMLDivElement>("receive-run");
 const receiveTitle = $<HTMLHeadingElement>("receive-title");
 const cameraToggle = $<HTMLInputElement>("camera");
 const flipButton = $<HTMLButtonElement>("flip");
-const preview = $<HTMLVideoElement>("preview");
+/** Looked up each time: the camera swaps the element on every open. */
+const preview = () => $<HTMLVideoElement>("preview");
 const scanMaxEdgeInput = $<HTMLInputElement>("scan-max-edge");
 const turnaroundMsInput = $<HTMLInputElement>("turnaround-ms");
 const ackEveryInput = $<HTMLInputElement>("ack-every");
@@ -269,7 +270,7 @@ let devices: Devices | undefined;
 let opening: Promise<Devices> | undefined;
 
 function getDevices(): Promise<Devices> {
-  opening ??= openDevices(qrCanvas, cimbarCanvas, preview).then(
+  opening ??= openDevices(qrCanvas, cimbarCanvas, preview()).then(
     ({ sound, qr, codecs, sampleRate }) => {
       sound.log = log;
       sound.protocol = protocol();
@@ -770,11 +771,11 @@ async function watchCamera(qr: QrTransport) {
   } catch (err) {
     log(`camera failed: ${err}`);
   }
-  preview.hidden = flipButton.hidden = !qr.watching;
+  preview().hidden = flipButton.hidden = !qr.watching;
   if (!qr.watching) return;
-  const box = preview.getBoundingClientRect();
+  const box = preview().getBoundingClientRect();
   log(
-    `camera: watching (${qr.facing}) ${preview.videoWidth}x${preview.videoHeight}, preview ${
+    `camera: watching (${qr.facing}) ${preview().videoWidth}x${preview().videoHeight}, preview ${
       Math.round(box.width)
     }x${Math.round(box.height)} at ${Math.round(box.left)},${
       Math.round(box.top)
@@ -784,7 +785,7 @@ async function watchCamera(qr: QrTransport) {
 
 function closeCamera() {
   devices?.qr.stopWatching();
-  preview.hidden = flipButton.hidden = true;
+  preview().hidden = flipButton.hidden = true;
 }
 
 cameraToggle.addEventListener("change", () => {
@@ -846,7 +847,7 @@ listenButton.addEventListener("click", async () => {
           | CimbarStats
           | undefined;
         log(
-          `receive: camera ${preview.videoWidth}x${preview.videoHeight}, QR scanned ${frames} frames, ${codes} with a code, ${packets} packets` +
+          `receive: camera ${preview().videoWidth}x${preview().videoHeight}, QR scanned ${frames} frames, ${codes} with a code, ${packets} packets` +
             (c
               ? `; cimbar ${c.frames} frames: ${c.noCode} no code, ${c.unreadable} unreadable, ${c.heard} read, ${c.errors} errors${
                 c.lastError ? ` (last: ${c.lastError})` : ""

@@ -78,10 +78,13 @@ fresh port is a clean origin. README, "Testing on phones", has the rest.
   share bar per transfer; log, including acks on both ends. One button per
   screen flips between Send/Listen and Stop. A camera send shows the code
   full-window with its own Stop button. Tuning inputs sit under Advanced,
-  including a camera codec select (Cimbar, the default, or QR code; only QR
-  adapts its rate). Defaults: 4 packets per code, 5 fps, ECC medium, adapt rate
-  on; camera on, scan max edge 1280, ack every 80 symbols (0 never acks);
-  silence 12 s.
+  including a camera codec select (Cimbar, the default, or QR code; both adapt
+  their rate). Cimbar starts at 6 codes per second: at 15 an iPhone in room
+  light caught most codes blended with the next, which cimbar rejects. A cimbar
+  send that hears no ack in `CIMBAR_FALLBACK_AFTER` (100) codes starts over as a
+  QR send with a new transfer id, since every receiver reads QR. Defaults: 4
+  packets per code, 5 fps, ECC medium, adapt rate on; camera on, scan max edge
+  1280, ack every 80 symbols (0 never acks); silence 12 s.
 - `src/adapters/` — the only browser-API code besides the entries: `pageLink.ts`
   (`openDevices`: one codec worker shared by both transports; `cameraCodecs`:
   the registry of camera codecs by name, each an `encoder` and a `decoder()`
@@ -93,11 +96,12 @@ fresh port is a clean origin. README, "Testing on phones", has the rest.
   libcimbar's wasm in `static/cimbar/`, MPL-2.0, v0.6.9 unmodified: mode B only,
   its own wirehair fountain code and zstd, so the bundle goes in whole; the
   7-bit encode id in each frame's header is the transfer id, so acks and DONE
-  work, but its acks name no blocks and carry no share; iPhone NV12 frames go to
-  its workers as 1920-px RGBA), `library.ts` (IndexedDB library: `record`,
-  `listItems`, `getItem`, `removeItem`, `putItem`; dedupes and evicts on save),
-  `clipboard.ts` (`copyBlob`: text as text, images redrawn as PNG; `openType`:
-  markup and SVG open as plain text).
+  work; its acks name no blocks but carry the share of frames read, counted in
+  chunks by `CimbarTally`; iPhone NV12 frames go to its workers as 1920-px
+  RGBA), `library.ts` (IndexedDB library: `record`, `listItems`, `getItem`,
+  `removeItem`, `putItem`; dedupes and evicts on save), `clipboard.ts`
+  (`copyBlob`: text as text, images redrawn as PNG; `openType`: markup and SVG
+  open as plain text).
 - `src/libraryView.ts` — the library screens, imported by `diag.ts`: the home
   tile's newest title, `#library` (rows by day, Undo after a delete, count and
   disclosure), and `#library/<hash>` (preview, events, Copy/Share/Save/Delete).
@@ -168,7 +172,11 @@ The protocol layer. Spec: the main checkout's
   `qrEncoder`: QR codes of `packetsPerCode` 128-byte packets at `fps`.
   `OVERHEAD` is the 10 % repair the estimate assumes.
 - `cimbarFrame.ts` — `cimbarHeader`: libcimbar's 6-byte chunk header (encode id,
-  file size, block id). `nv12.ts` — `nv12ToRgba`, downscaling by a whole factor.
+  file size, block id); `CimbarTally`: a receiver's frames read, in chunks (12 a
+  frame, so first block ids step by 12), and the share read between acks. The
+  sender restarts its block ids after about 8 times the blocks needed; past
+  that, acks carry no share. `nv12.ts` — `nv12ToRgba`, downscaling by a whole
+  factor.
 - `transferDecoder.ts` — `TransferDecoder`, what `receiveBundle` takes from a
   camera codec: `onHeard`, `onComplete`, `ack` (the figures for one ack),
   `status`, `forget`, `close`. `packetDecoder` is the fountain-packet one over a
@@ -207,8 +215,9 @@ The protocol layer. Spec: the main checkout's
   function from a `RateSample` to the next `CameraRate` (`fps`, and an optional
   `packetsPerCode`, 1 when left out). `ladderPolicy` is the one in use; its
   ladder (2 to 9 packets per code, 5 to 10 fps) and thresholds are
-  `LADDER_DEFAULTS`, guesses to be tuned on phones. `SILENT_AFTER` is 240. The
-  receiver needs no rate: a code says how many packets it holds.
+  `LADDER_DEFAULTS`, guesses to be tuned on phones; `CIMBAR_LADDER` is fps only,
+  6 to 20. `SILENT_AFTER` is 240. The receiver needs no rate: a code says how
+  many packets it holds.
 - `qr/` — `qrEncoder.ts` (128-byte packets into one byte-mode code, `QrEcc`;
   four at medium ECC are version 19, carrying 480 data bytes), `qrDecoder.ts`
   (RGBA frame to packets), `bytesAsText.ts`, `rasterize.ts` (`QR_COLORS`, test
@@ -272,10 +281,11 @@ Wire facts (multi-byte fields big-endian):
   sound) or the receive ends.
 - It is a PWA: `static/manifest.webmanifest` plus `static/sw.js`, a plain-JS
   service worker that precaches every asset (cache-first, network fallback) so
-  the app opens offline. `src/diag.ts` registers it. Airgap's cache gotcha
-  applies: a change only reaches a device on its second open after the deploy,
-  and the build's hash stamp is what makes it reach at all. Never edit
-  `dist/sw.js` by hand.
+  the app opens offline. Its `ASSETS` list is by hand, cimbar's dated files
+  included; `build.ts` fails if one is missing from `dist/`. `src/diag.ts`
+  registers it. Airgap's cache gotcha applies: a change only reaches a device on
+  its second open after the deploy, and the build's hash stamp is what makes it
+  reach at all. Never edit `dist/sw.js` by hand.
 
 ## Workflow
 

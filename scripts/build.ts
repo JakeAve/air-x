@@ -32,6 +32,18 @@ export async function build() {
   for (const [entry, out] of ENTRIES) await bundle(entry, join(DIST, out));
   await copy(join(DIST, "diag.html"), join(DIST, "index.html"));
   await stampServiceWorker();
+  await checkPrecache();
+}
+
+/** One missing path in sw.js's ASSETS fails its whole install, so the app would never work offline. */
+async function checkPrecache() {
+  const sw = await Deno.readTextFile(join(DIST, "sw.js"));
+  const list = sw.slice(sw.indexOf("ASSETS"), sw.indexOf("];"));
+  for (const [, path] of list.matchAll(/"\.\/([^"]*)"/g)) {
+    await Deno.stat(join(DIST, path || "index.html")).catch(() => {
+      throw new Error(`sw.js precaches ${path}, which is not in dist/`);
+    });
+  }
 }
 
 /** Writes a content hash of dist/ into sw.js so a new build is a new cache. */

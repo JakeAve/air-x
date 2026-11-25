@@ -31,6 +31,8 @@ export interface CameraSending {
 
 export interface CameraEncoder {
   readonly name: string;
+  /** Bits of transfer id the codec's frames carry; 16, a packet's, when left out. */
+  readonly idBits?: number;
   start(
     bundle: Uint8Array,
     transferId: number,

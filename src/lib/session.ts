@@ -85,7 +85,8 @@ export async function sendBundle(
   if (sound && camera) {
     throw new RangeError("sendBundle takes sound or camera, not both");
   }
-  const transferId = crypto.getRandomValues(new Uint16Array(1))[0];
+  const transferId = crypto.getRandomValues(new Uint16Array(1))[0] &
+    (2 ** (camera?.encoder.idBits ?? 16) - 1);
   const heardDone = new AbortController();
   const stop = anySignal(signal, heardDone.signal);
   const stream = sound

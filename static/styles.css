@@ -970,6 +970,21 @@ pre {
   image-rendering: pixelated;
 }
 
+/* Fills the frame's first row; cimbar.ts sizes the canvas inside it to the
+   code's aspect in whole px, as large as fits. */
+.cimbar-box {
+  align-self: stretch;
+  justify-self: stretch;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+}
+
+.cimbar-box canvas {
+  display: block;
+}
+
 /* With the camera open the video fills the viewport behind the page and the
    receive screen lies on top: a `--scrim` band under the title, the grid
    below it with translucent tiles so the picture reads through, and another

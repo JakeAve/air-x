@@ -78,9 +78,10 @@ fresh port is a clean origin. README, "Testing on phones", has the rest.
   share bar per transfer; log, including acks on both ends. One button per
   screen flips between Send/Listen and Stop. A camera send shows the code
   full-window with its own Stop button. Tuning inputs sit under Advanced,
-  including a camera codec select (QR only). Defaults: 4 packets per code, 5
-  fps, ECC medium, adapt rate on; camera on, scan max edge 1280, ack every 80
-  symbols (0 never acks); silence 12 s.
+  including a camera codec select (Cimbar, the default, or QR code; only QR
+  adapts its rate). Defaults: 4 packets per code, 5 fps, ECC medium, adapt rate
+  on; camera on, scan max edge 1280, ack every 80 symbols (0 never acks);
+  silence 12 s.
 - `src/adapters/` — the only browser-API code besides the entries: `pageLink.ts`
   (`openDevices`: one codec worker shared by both transports; `cameraCodecs`:
   the registry of camera codecs by name, each an `encoder` and a `decoder()`
@@ -88,8 +89,13 @@ fresh port is a clean origin. README, "Testing on phones", has the rest.
   `soundTransport.ts` (`SoundTransport`, a `PacketChannel`), `qrTransport.ts`
   (`QrTransport`, a `PacketSource` and `PacketDisplay`), `camera.ts`,
   `screen.ts` (draws a code on a canvas), `codecWorker.ts`, `microphone.ts`,
-  `speaker.ts`, `library.ts` (IndexedDB library: `record`, `listItems`,
-  `getItem`, `removeItem`, `putItem`; dedupes and evicts on save),
+  `speaker.ts`, `cimbar.ts` (`cimbarEncoder` and `cimbarDecoder` over
+  libcimbar's wasm in `static/cimbar/`, MPL-2.0, v0.6.9 unmodified: mode B only,
+  its own wirehair fountain code and zstd, so the bundle goes in whole; the
+  7-bit encode id in each frame's header is the transfer id, so acks and DONE
+  work, but its acks name no blocks and carry no share; iPhone NV12 frames go to
+  its workers as 1920-px RGBA), `library.ts` (IndexedDB library: `record`,
+  `listItems`, `getItem`, `removeItem`, `putItem`; dedupes and evicts on save),
   `clipboard.ts` (`copyBlob`: text as text, images redrawn as PNG; `openType`:
   markup and SVG open as plain text).
 - `src/libraryView.ts` — the library screens, imported by `diag.ts`: the home
@@ -158,8 +164,11 @@ The protocol layer. Spec: the main checkout's
   (`start(bundle, transferId, rate, signal,
   onFrame)` returns a
   `CameraSending` with `setRate`, `resend`, `fresh`, `done`; `seconds` estimates
-  a send) and `qrEncoder`: QR codes of `packetsPerCode` 128-byte packets at
-  `fps`. `OVERHEAD` is the 10 % repair the estimate assumes.
+  a send; `idBits` narrows the transfer id `sendBundle` draws, 7 for cimbar) and
+  `qrEncoder`: QR codes of `packetsPerCode` 128-byte packets at `fps`.
+  `OVERHEAD` is the 10 % repair the estimate assumes.
+- `cimbarFrame.ts` — `cimbarHeader`: libcimbar's 6-byte chunk header (encode id,
+  file size, block id). `nv12.ts` — `nv12ToRgba`, downscaling by a whole factor.
 - `transferDecoder.ts` — `TransferDecoder`, what `receiveBundle` takes from a
   camera codec: `onHeard`, `onComplete`, `ack` (the figures for one ack),
   `status`, `forget`, `close`. `packetDecoder` is the fountain-packet one over a

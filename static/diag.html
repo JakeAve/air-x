@@ -32,7 +32,7 @@
       <section id="screen-home" class="screen">
         <h1>air x</h1>
         <p
-          class="lede">Transfer data between devices without a network connection. Use sound or a QR code.</p>
+          class="lede">Transfer data between devices without a network connection. Use sound or the camera.</p>
         <nav class="tiles">
           <a class="tile" href="#send">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -86,9 +86,15 @@
               <h2>Camera</h2>
               <label>Codec
                 <select id="camera-codec">
-                  <option value="qr" selected>QR code</option>
+                  <option value="cimbar" selected>Cimbar</option>
+                  <option value="qr">QR code</option>
                 </select>
               </label>
+              <div class="stack" data-codec="cimbar">
+                <label>Codes per second
+                  <input id="cimbar-fps" type="number" inputmode="decimal" min="1" step="1" value="15" />
+                </label>
+              </div>
               <div class="stack" data-codec="qr">
                 <div class="row">
                   <label>Packets per code
@@ -155,7 +161,7 @@
         </header>
         <h1 id="receive-title">receive</h1>
         <div id="receive-form" class="stack">
-          <label class="switch">Scan QR with camera
+          <label class="switch">Scan codes with camera
             <input id="camera" type="checkbox" checked />
             <span class="state"></span>
           </label>
@@ -238,6 +244,9 @@
     </main>
     <div id="camera-frame" class="camera-frame" hidden>
       <canvas id="qr-canvas" class="qr"></canvas>
+      <div id="cimbar-box" class="cimbar-box" hidden>
+        <canvas id="cimbar-canvas"></canvas>
+      </div>
       <p id="camera-line" class="muted">–</p>
       <button id="camera-stop">Stop</button>
     </div>

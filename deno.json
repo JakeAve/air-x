@@ -38,7 +38,8 @@
       ]
     },
     "exclude": [
-      "vendor/"
+      "vendor/",
+      "static/cimbar/"
     ]
   },
   "exclude": [
@@ -51,7 +52,8 @@
   "unstable": ["bundle"],
   "fmt": {
     "exclude": [
-      "vendor/"
+      "vendor/",
+      "static/cimbar/"
     ]
   }
 }

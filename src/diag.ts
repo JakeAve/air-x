@@ -7,6 +7,7 @@ import type { QrTransport } from "@/adapters/qrTransport.ts";
 import type { SoundTransport } from "@/adapters/soundTransport.ts";
 import { copyBlob, openType } from "@/adapters/clipboard.ts";
 import { record } from "@/adapters/library.ts";
+import type { CimbarStats } from "@/adapters/cimbar.ts";
 import type { LibraryEvent } from "@/lib/library.ts";
 import {
   leaveLibrary,
@@ -53,6 +54,9 @@ const protocolSelect = $<HTMLSelectElement>("protocol");
 const listenEveryInput = $<HTMLInputElement>("listen-every");
 const windowMsInput = $<HTMLInputElement>("window-ms");
 const qrCanvas = $<HTMLCanvasElement>("qr-canvas");
+const cimbarBox = $<HTMLDivElement>("cimbar-box");
+const cimbarCanvas = $<HTMLCanvasElement>("cimbar-canvas");
+const cimbarFpsInput = $<HTMLInputElement>("cimbar-fps");
 const cameraFrame = $<HTMLDivElement>("camera-frame");
 const cameraLine = $<HTMLParagraphElement>("camera-line");
 const cameraStop = $<HTMLButtonElement>("camera-stop");
@@ -252,7 +256,7 @@ let devices: Devices | undefined;
 let opening: Promise<Devices> | undefined;
 
 function getDevices(): Promise<Devices> {
-  opening ??= openDevices(qrCanvas, preview).then(
+  opening ??= openDevices(qrCanvas, cimbarCanvas, preview).then(
     ({ sound, qr, codecs, sampleRate }) => {
       sound.log = log;
       sound.protocol = protocol();
@@ -296,7 +300,9 @@ function rates() {
     fps,
     listenEvery,
     windowMs,
-    cameraRate: { packetsPerCode, fps },
+    cameraRate: cameraCodec() === "cimbar"
+      ? { fps: positive(cimbarFpsInput, 15) }
+      : { packetsPerCode, fps },
     soundPerSecond,
   };
 }
@@ -444,6 +450,8 @@ sendButton.addEventListener("click", async () => {
     sendForm.hidden = true;
     sendRun.hidden = false;
     cameraFrame.hidden = by !== "camera";
+    qrCanvas.hidden = codec !== "qr";
+    cimbarBox.hidden = codec !== "cimbar";
     $("send-grid").hidden = by !== "sound";
     if (by === "sound") {
       gridReset("send-grid", n, $("send-grid").clientWidth, innerHeight / 2);
@@ -469,11 +477,11 @@ sendButton.addEventListener("click", async () => {
     log(
       `send: ${items.length} item(s), ${bundle.length} bytes` +
         (by === "camera"
-          ? `, camera ${
-            encoder.name === "qr" ? "QR code" : encoder.name
-          } ${cameraRate.packetsPerCode}/code @ ${cameraRate.fps} fps ${qr.ecc}${
-            adaptRateToggle.checked ? ", adaptive" : ""
-          }`
+          ? codec === "qr"
+            ? `, camera QR code ${cameraRate.packetsPerCode}/code @ ${cameraRate.fps} fps ${qr.ecc}${
+              adaptRateToggle.checked ? ", adaptive" : ""
+            }`
+            : `, camera ${codec} @ ${cameraRate.fps} fps`
           : `, sound ${sound.protocol} listenEvery ${listenEvery} window ${windowMs} ms`),
     );
     let transfer: number | undefined;
@@ -495,7 +503,7 @@ sendButton.addEventListener("click", async () => {
       save(items, {
         direction: "sent",
         at: Date.now(),
-        via: by === "camera" ? "qr" : "sound",
+        via: by === "camera" ? codec : "sound",
         ms: performance.now() - start,
       });
     };
@@ -508,7 +516,8 @@ sendButton.addEventListener("click", async () => {
         ? {
           encoder,
           rate: cameraRate,
-          adapt: adaptRateToggle.checked
+          // Only QR's acks carry a share yet, so only QR adapts.
+          adapt: adaptRateToggle.checked && codec === "qr"
             ? { policy: ladderPolicy(), silentAfter: SILENT_AFTER }
             : undefined,
         }
@@ -700,11 +709,19 @@ let scanningQr = false;
 async function watchCamera(qr: QrTransport) {
   try {
     await qr.watch();
-    log(`camera: watching (${qr.facing})`);
   } catch (err) {
     log(`camera failed: ${err}`);
   }
   preview.hidden = flipButton.hidden = !qr.watching;
+  if (!qr.watching) return;
+  const box = preview.getBoundingClientRect();
+  log(
+    `camera: watching (${qr.facing}) ${preview.videoWidth}x${preview.videoHeight}, preview ${
+      Math.round(box.width)
+    }x${Math.round(box.height)} at ${Math.round(box.left)},${
+      Math.round(box.top)
+    } in a ${innerWidth}x${innerHeight} window`,
+  );
 }
 
 function closeCamera() {
@@ -767,8 +784,16 @@ listenButton.addEventListener("click", async () => {
     if (scanningQr) {
       scanReport = setInterval(() => {
         const { frames, codes, packets } = qr.stats;
+        const c = decoders.find((d) => d.name === "cimbar")?.stats as
+          | CimbarStats
+          | undefined;
         log(
-          `receive: camera ${preview.videoWidth}x${preview.videoHeight}, scanned ${frames} frames, ${codes} with a code, ${packets} packets`,
+          `receive: camera ${preview.videoWidth}x${preview.videoHeight}, QR scanned ${frames} frames, ${codes} with a code, ${packets} packets` +
+            (c
+              ? `; cimbar ${c.frames} frames: ${c.noCode} no code, ${c.unreadable} unreadable, ${c.heard} read, ${c.errors} errors${
+                c.lastError ? ` (last: ${c.lastError})` : ""
+              }`
+              : ""),
         );
       }, SCAN_REPORT_MS);
     }
@@ -872,7 +897,7 @@ listenButton.addEventListener("click", async () => {
         save(items, {
           direction: "received",
           at: Date.now(),
-          via: via === "sound" ? "sound" : "qr",
+          via: via as LibraryEvent["via"],
           // A one-packet transfer can complete before any progress.
           ms: performance.now() - (firstSeen.get(transferId) ?? start),
         }).then((ok) => {
